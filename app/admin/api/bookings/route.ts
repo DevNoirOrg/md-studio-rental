@@ -1,8 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { adminCookie, validAdminSession } from "@/lib/admin-auth";
+import { adminFromRequest } from "@/lib/admin-auth";
 import { bookingStore } from "@/lib/booking-store";
 import { randomBytes } from "node:crypto";
 import { validateBooking, validateBookingTime } from "@/lib/studio-booking";
+import { loadRoomsConfig } from "@/lib/rooms-store";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ interface AdminSlotRow {
 export async function PATCH(request: NextRequest) {
   const headers = { "Cache-Control": "private, no-store" };
   try {
-    if (!validAdminSession(request.cookies.get(adminCookie)?.value)) {
+    if (!(await adminFromRequest(request))) {
       return NextResponse.json({ error: "A munkamenet lejárt. Jelentkezz be újra." }, { status: 401, headers });
     }
     if (request.headers.get("origin") !== new URL(request.url).origin) {
@@ -40,14 +41,17 @@ export async function PATCH(request: NextRequest) {
         Object.keys(input).some((key) => !["date", "hour"].includes(key))) {
       return NextResponse.json({ error: "Csak a dátum és a kezdési idő módosítható." }, { status: 400, headers });
     }
-    const records = await bookingStore<Array<{ id: string; date: string; hour: number; duration_minutes: number }>>(`studio_slots?id=eq.${id}&status=in.(pending,approved)&select=id,date,hour,duration_minutes`);
+    const records = await bookingStore<Array<{ id: string; room?: string; date: string; hour: number; duration_minutes: number }>>(`studio_slots?id=eq.${id}&status=in.(pending,approved)&select=id,room,date,hour,duration_minutes`);
     if (!Array.isArray(records)) throw new Error("Invalid booking lookup response.");
     if (records.length === 0) {
       return NextResponse.json({ error: "A foglalás már nem található vagy nem módosítható. Frissítsd a naptárt." }, { status: 404, headers });
     }
     const original = records[0];
     const change = input as { date?: unknown; hour?: unknown };
-    const error = validateBookingTime({ date: change.date, hour: change.hour, durationMinutes: original.duration_minutes });
+    const error = validateBookingTime(
+      { room: original.room, date: change.date, hour: change.hour, durationMinutes: original.duration_minutes },
+      new Date(), await loadRoomsConfig(),
+    );
     if (error) return NextResponse.json({ error }, { status: 400, headers });
     // A feltételes frissítés nem írhat felül közben átfoglalt időpontot.
     const params = new URLSearchParams({
@@ -75,7 +79,7 @@ export async function PATCH(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   const headers = { "Cache-Control": "private, no-store" };
   try {
-    if (!validAdminSession(request.cookies.get(adminCookie)?.value)) {
+    if (!(await adminFromRequest(request))) {
       return NextResponse.json({ error: "A munkamenet lejárt. Jelentkezz be újra." }, { status: 401, headers });
     }
     if (request.headers.get("origin") !== new URL(request.url).origin) {
@@ -103,7 +107,7 @@ export async function DELETE(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const headers = { "Cache-Control": "private, no-store" };
   try {
-    if (!validAdminSession(request.cookies.get(adminCookie)?.value)) {
+    if (!(await adminFromRequest(request))) {
       return NextResponse.json({ error: "A munkamenet lejárt. Jelentkezz be újra." }, { status: 401, headers });
     }
     if (request.headers.get("origin") !== new URL(request.url).origin) {
@@ -115,7 +119,7 @@ export async function POST(request: NextRequest) {
     } catch {
       return NextResponse.json({ error: "Érvénytelen kérésformátum." }, { status: 400, headers });
     }
-    const { booking, error } = validateBooking(input);
+    const { booking, error } = validateBooking(input, new Date(), await loadRoomsConfig());
     if (!booking) return NextResponse.json({ error }, { status: 400, headers });
     await bookingStore("rpc/create_admin_studio_request", {
       method: "POST",
@@ -134,10 +138,9 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
-  const token = request.cookies.get(adminCookie)?.value;
   const headers = { "Cache-Control": "private, no-store" };
   try {
-    if (!validAdminSession(token)) {
+    if (!(await adminFromRequest(request))) {
       return NextResponse.json({ error: "A munkamenet lejárt. Jelentkezz be újra." }, { status: 401, headers });
     }
     const params = new URL(request.url).searchParams;

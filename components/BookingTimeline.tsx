@@ -4,13 +4,31 @@ import type React from "react";
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { canRescheduleBooking, endHour, formatBookingHour, overlaps, type Slot, type StoredSlot } from "@/lib/studio-booking";
+import { openingFor, weeklyRange, type RoomsConfig } from "@/lib/room-config";
 
-const starts = Array.from({ length: 28 }, (_, index) => 8 + index / 2);
 const rowHeight = 32;
+
+/**
+ * A naptár rácsa (kezdő és záró óra) egy teremre: a hét bármely napjának
+ * nyitvatartása + a megjelenítendő foglalások (hogy a nyitvatartáson kívüli régi
+ * foglalások is látszódjanak).
+ */
+export function timelineRange(config: RoomsConfig, room: string, slots: Slot[] = []): { start: number; end: number } {
+  const c = (config as Record<string, RoomsConfig[keyof RoomsConfig]>)[room];
+  const base = c ? weeklyRange(c) : { start: 8, end: 22 };
+  const own = slots.filter((slot) => slot.room === room);
+  return {
+    start: Math.floor(Math.min(base.start, ...own.map((slot) => slot.hour)) * 2) / 2,
+    end: Math.ceil(Math.max(base.end, ...own.map((slot) => endHour(slot))) * 2) / 2,
+  };
+}
 
 type Edge = "top" | "bottom";
 
 interface BookingTimelineProps<T extends StoredSlot> {
+  config: RoomsConfig;
+  /** A rács kezdete és vége (órában) — a hét összes napján azonos, hogy a sorok egy vonalban legyenek. */
+  range: { start: number; end: number };
   room: string;
   date: string;
   selectedSlots: Slot[];
@@ -27,23 +45,26 @@ interface BookingTimelineProps<T extends StoredSlot> {
 }
 
 export default function BookingTimeline<T extends StoredSlot>({
-  room, date, selectedSlots, storedSlots, availabilityReady, now, onSelect, onResize, onRemove, readOnly = false, onBookingClick, removeOnClick = false,
+  config, range, room, date, selectedSlots, storedSlots, availabilityReady, now, onSelect, onResize, onRemove, readOnly = false, onBookingClick, removeOnClick = false,
   reschedulingBooking = null,
 }: BookingTimelineProps<T>) {
   const [preview, setPreview] = useState<Slot | null>(null);
+  const opening = openingFor(config, room, date);
+  const starts = Array.from({ length: Math.max(0, (range.end - range.start) * 2) }, (_, index) => range.start + index / 2);
+  const isOpen = (hour: number) => !!opening && hour >= opening.open && hour < opening.close;
   const selected = selectedSlots.filter((slot) => slot.room === room && slot.date === date);
   const stored = storedSlots.filter((slot) => slot.room === room && slot.date === date);
   const isPast = (hour: number) => new Date(`${date}T${formatBookingHour(hour)}:00`) <= now;
   const sameStart = (a: Slot, b: Slot) => a.room === b.room && a.date === b.date && a.hour === b.hour;
   const allowed = (slot: Slot, original?: Slot): boolean => reschedulingBooking
-    ? !readOnly && availabilityReady && canRescheduleBooking(reschedulingBooking, slot, stored, now)
-    : !readOnly && availabilityReady && slot.hour >= 8 && !isPast(slot.hour) &&
-    endHour(slot) <= 22 && (slot.durationMinutes ?? 60) >= 60 &&
+    ? !readOnly && availabilityReady && canRescheduleBooking(reschedulingBooking, slot, stored, now, config)
+    : !readOnly && availabilityReady && !!opening && slot.hour >= opening.open && !isPast(slot.hour) &&
+    endHour(slot) <= opening.close && (slot.durationMinutes ?? 60) >= 60 &&
     !stored.some((other) => overlaps(slot, other)) &&
     !selected.some((other) => (!original || !sameStart(other, original)) && overlaps(slot, other));
 
   const styleFor = (slot: Slot) => ({
-    top: (slot.hour - 8) * 2 * rowHeight,
+    top: (slot.hour - range.start) * 2 * rowHeight,
     height: (endHour(slot) - slot.hour) * 2 * rowHeight,
   });
   const rangeLabel = (slot: Slot) => `${formatBookingHour(slot.hour)}–${formatBookingHour(endHour(slot))}`;
@@ -104,7 +125,7 @@ export default function BookingTimeline<T extends StoredSlot>({
         const available = allowed(slot);
         return (
           <button key={hour} type="button" data-booking-hour={hour}
-            aria-label={`${room}, ${date}, ${rangeLabel(slot)} – ${available ? "szabad idősáv kiválasztása" : "nem választható"}`}
+            aria-label={`${room}, ${date}, ${rangeLabel(slot)} – ${available ? "szabad idősáv kiválasztása" : isOpen(hour) ? "nem választható" : "zárva"}`}
             disabled={reschedulingBooking ? readOnly || !availabilityReady : !available}
             aria-disabled={reschedulingBooking && !available ? true : undefined}
             onPointerEnter={(event) => {
@@ -119,11 +140,12 @@ export default function BookingTimeline<T extends StoredSlot>({
               }
             }}
             className={`absolute inset-x-0 flex w-full scroll-mt-28 items-start border-t px-2 pt-1 text-left text-[10px] focus-visible:z-30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#087c81] ${
-              isPast(hour) ? "bg-gray-100 text-gray-400" : "text-gray-500"
+              !isOpen(hour) ? "md-closed-slot text-gray-400" : isPast(hour) ? "bg-gray-100 text-gray-400" : "text-gray-500"
             } ${reschedulingBooking && !available ? "cursor-not-allowed" : ""} ${Number.isInteger(hour) ? "border-gray-300" : "border-dashed border-gray-200"}`}
-            style={{ top: (hour - 8) * 2 * rowHeight, height: rowHeight }}
+            style={{ top: (hour - range.start) * 2 * rowHeight, height: rowHeight }}
           >
             {formatBookingHour(hour)}
+            {!opening && hour === range.start && <span className="ml-auto pr-1 font-bold uppercase tracking-widest">Zárva</span>}
           </button>
         );
       })}
@@ -206,7 +228,7 @@ export default function BookingTimeline<T extends StoredSlot>({
       )}
       {preview && preview.date === date && preview.room === room && (reschedulingBooking || allowed(preview)) && (
         <div data-booking-preview data-available={allowed(preview)}
-          style={{ ...styleFor(preview), ...(reschedulingBooking ? { maxHeight: (22 - preview.hour) * 2 * rowHeight } : {}) }}
+          style={{ ...styleFor(preview), ...(reschedulingBooking ? { maxHeight: (range.end - preview.hour) * 2 * rowHeight } : {}) }}
           aria-hidden="true"
           className={`pointer-events-none absolute inset-x-0 z-30 border-2 border-dashed ${
             allowed(preview) ? "border-[#087c81] bg-[#40CFD5]/25" : "border-red-600 bg-red-200/60 text-red-900"

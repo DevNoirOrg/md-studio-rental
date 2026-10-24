@@ -1,0 +1,23 @@
+# Heti függőségfrissítés. A Next.js / React / eslint-config-next egy csoportban jön,
+# hogy mindig együtt frissüljenek (lásd STACK.md).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      next-react:
+        patterns: ["next", "eslint-config-next", "react", "react-dom", "@types/react", "@types/react-dom"]
+      tailwind:
+        patterns: ["tailwindcss", "@tailwindcss/*"]
+      supabase:
+        patterns: ["@supabase/*"]
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

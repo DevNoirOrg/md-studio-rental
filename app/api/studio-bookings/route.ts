@@ -3,6 +3,7 @@ import { validateBooking, emailPattern } from "@/lib/studio-booking";
 import { buildBookingEmail } from "@/lib/booking-email";
 import { randomBytes } from "node:crypto";
 import { bookingStore, tokenHash } from "@/lib/booking-store";
+import { loadRoomsConfig } from "@/lib/rooms-store";
 
 export const runtime = "nodejs";
 
@@ -43,7 +44,14 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "Érvénytelen kérésformátum." }, { status: 400 });
   }
-  const { booking, error } = validateBooking(input);
+  let config;
+  try {
+    config = await loadRoomsConfig();
+  } catch (caught) {
+    console.error("Room settings could not be loaded.", { name: (caught as Error).name });
+    return NextResponse.json({ error: "A foglalási rendszer átmenetileg nem elérhető. Próbáld újra később." }, { status: 503 });
+  }
+  const { booking, error } = validateBooking(input, new Date(), config);
   if (!booking) return NextResponse.json({ error }, { status: 400 });
 
   const apiKey = process.env.RESEND_API_KEY;

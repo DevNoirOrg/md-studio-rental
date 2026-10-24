@@ -1,5 +1,6 @@
 import { Fragment } from 'react'
 import type { Metadata } from 'next'
+import { canonicalUrl } from '@/lib/base-path'
 import SiteHeader from '@/components/SiteHeader'
 import SiteFooter from '@/components/SiteFooter'
 import { parsePrivacyText, privacyText, type PrivacyBlock } from '@/lib/privacy'
@@ -7,6 +8,7 @@ import { parsePrivacyText, privacyText, type PrivacyBlock } from '@/lib/privacy'
 export const metadata: Metadata = {
   title: 'Adatkezelési tájékoztató – MD Dance School',
   description: 'Az MD Dance School (Master Dance Tánciskola) adatkezelési tájékoztatója.',
+  alternates: { canonical: canonicalUrl('/adatkezeles') },
 }
 
 function Blocks({ blocks }: { blocks: PrivacyBlock[] }) {

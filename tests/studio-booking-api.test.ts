@@ -6,6 +6,7 @@ import { PGlite } from "@electric-sql/pglite";
 
 const hooks = registerHooks({
   resolve(specifier, context, nextResolve) {
+    if (specifier === "@/lib/rooms-store") return nextResolve(new URL("./stubs/rooms-store.ts", import.meta.url).href, context);
     if (specifier.startsWith("@/")) {
       return nextResolve(new URL(`../${specifier.slice(2)}.ts`, import.meta.url).href, context);
     }
@@ -53,6 +54,10 @@ test("single SQL script upgrades legacy bookings and can be rerun without data l
     `);
     const schema = await readFile(new URL("../supabase/studio-bookings.sql", import.meta.url), "utf8");
     await db.exec(schema);
+    await db.exec("set search_path to rental, public");
+    // a régi public sémás táblák adatvesztés nélkül átkerültek a rental sémába
+    assert.equal((await db.query("select to_regclass('public.studio_slots') is null as moved")).rows[0].moved, true);
+    assert.equal((await db.query("select count(*)::integer as n from rental.studio_requests")).rows[0].n, 1);
     assert.equal((await db.query("select duration_minutes from studio_slots")).rows[0].duration_minutes, 60);
     assert.equal((await db.query("select count(*)::integer as n from studio_slot_units")).rows[0].n, 2);
     const slot = (await db.query("select id from studio_slots")).rows[0];
@@ -75,6 +80,7 @@ test("booking API and real PostgreSQL transactions cover decisions, conflicts an
   const db = new PGlite();
   await db.exec("create role anon; create role authenticated; create role service_role bypassrls;");
   await db.exec(await readFile(new URL("../supabase/studio-bookings.sql", import.meta.url), "utf8"));
+    await db.exec("set search_path to rental, public");
   const originalFetch = globalThis.fetch;
   const originalLog = console.error;
   const envKeys = ["RESEND_API_KEY", "RESEND_FROM_EMAIL", "BOOKING_NOTIFICATION_EMAIL", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "APP_BASE_URL"];
@@ -151,8 +157,8 @@ test("booking API and real PostgreSQL transactions cover decisions, conflicts an
 
     await t.test("RLS and RPC permissions block anonymous access", async () => {
       await db.exec("set role anon;");
-      await assert.rejects(db.query("select * from studio_requests"), /permission denied/);
-      await assert.rejects(db.query("select decide_studio_request('bad', 'approve-all', null)"), /permission denied/);
+      await assert.rejects(db.query("select * from rental.studio_requests"), /permission denied/);
+      await assert.rejects(db.query("select rental.decide_studio_request('bad', 'approve-all', null)"), /permission denied/);
       await db.exec("reset role;");
       await db.exec("set role service_role;");
       assert.equal((await db.query("select count(*)::integer as n from studio_requests")).rows[0].n, 0);

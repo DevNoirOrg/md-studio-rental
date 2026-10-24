@@ -20,16 +20,30 @@ import {
   X,
   Maximize2,
   CalendarCheck,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
-import { rooms, type Room } from "@/lib/studio-booking";
-import { roomDetails, roomPrice } from "@/lib/rooms";
+import { rooms, type LessonType, type Room } from "@/lib/studio-booking";
+import { mediaUrl, type RoomConfig } from "@/lib/room-config";
+import { useRoomsConfig } from "@/components/RoomsConfigContext";
 
 const huNumber = new Intl.NumberFormat("hu-HU");
 const huCurrency = new Intl.NumberFormat("hu-HU", { style: "currency", currency: "HUF", maximumFractionDigits: 0 });
 
-/* ── Egy terem kártyája: háttérkép, bal alul név + m² + klíma-ikon ── */
-function RoomCard({ room, index, onOpen }: { room: Room; index: number; onOpen: (room: Room) => void }) {
-  const d = roomDetails[room];
+const lessonNames: Record<LessonType, string> = { privat: "privát óra", kiscsoportos: "kiscsoportos óra", csoportos: "csoportos óra" };
+
+/** Az óradíj csak akkor látszik, ha már van választott óratípus (az ár attól függ). */
+function priceFor(d: RoomConfig, lessonType: LessonType | null): string | null {
+  if (!lessonType) return null;
+  if (!d.lessonTypes.includes(lessonType)) return `${lessonNames[lessonType]}: nem foglalható`;
+  return `${huCurrency.format(d.prices[lessonType])} / óra`;
+}
+
+/* ── Egy terem kártyája: háttérkép, bal alul név + m² + klíma-ikon (+ óradíj, ha van óratípus) ── */
+function RoomCard({ room, index, onOpen, lessonType }: { room: Room; index: number; onOpen: (room: Room) => void; lessonType: LessonType | null }) {
+  const d = useRoomsConfig()[room];
+  const cover = d.images[0];
+  const price = priceFor(d, lessonType);
   return (
     <motion.button
       type="button"
@@ -38,13 +52,13 @@ function RoomCard({ room, index, onOpen }: { room: Room; index: number; onOpen: 
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.45, delay: index * 0.08 }}
       whileHover={{ y: -6 }}
-      aria-label={`${room} részletei`}
+      aria-label={`${d.location} ${d.name} részletei`}
       className="group relative block aspect-[4/5] w-full overflow-hidden rounded-[1.75rem] bg-black text-left shadow-[0_14px_40px_rgba(0,0,0,0.16)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#40CFD5]/60"
     >
       <span
         aria-hidden="true"
         className="absolute inset-0 bg-cover bg-center transition-transform duration-700 ease-out group-hover:scale-105"
-        style={{ backgroundImage: `url('${d.image}')` }}
+        style={cover ? { backgroundImage: `url('${mediaUrl(cover)}')` } : undefined}
       />
       <span aria-hidden="true" className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent" />
 
@@ -71,18 +85,29 @@ function RoomCard({ room, index, onOpen }: { room: Room; index: number; onOpen: 
             </span>
           )}
         </span>
+        {price && (
+          <span className="mt-2 block text-sm font-extrabold text-[#40CFD5]">{price}</span>
+        )}
       </span>
     </motion.button>
   );
 }
 
-/* ── Részletes modal: balra info-sáv, jobbra nagy kép ── */
-function RoomModal({ room, onClose, onBook }: { room: Room; onClose: () => void; onBook: (room: Room) => void }) {
-  const d = roomDetails[room];
+/* ── Részletes modal: balra info-sáv, jobbra nagy kép (több kép esetén lapozható galéria) ── */
+function RoomModal({ room, onClose, onBook, lessonType }: { room: Room; onClose: () => void; onBook: (room: Room) => void; lessonType: LessonType | null }) {
+  const d = useRoomsConfig()[room];
   const closeRef = useRef<HTMLButtonElement>(null);
+  const [imageIndex, setImageIndex] = useState(0);
+  const imageCount = d.images.length;
+  const step = useCallback((dir: number) => setImageIndex((i) => (i + dir + imageCount) % Math.max(1, imageCount)), [imageCount]);
+  const price = priceFor(d, lessonType);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      if (e.key === "ArrowLeft") step(-1);
+      if (e.key === "ArrowRight") step(1);
+    };
     window.addEventListener("keydown", onKey);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -91,7 +116,7 @@ function RoomModal({ room, onClose, onBook }: { room: Room; onClose: () => void;
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prevOverflow;
     };
-  }, [onClose]);
+  }, [onClose, step]);
 
   const props = [
     { Icon: Ruler, label: "Alapterület", value: `${huNumber.format(d.area)} m²` },
@@ -103,7 +128,7 @@ function RoomModal({ room, onClose, onBook }: { room: Room; onClose: () => void;
     { Icon: Square, label: "Tükör", value: d.mirror },
     { Icon: Layers, label: "Padló", value: d.floor },
     { Icon: Lightbulb, label: "Világítás", value: d.light },
-    { Icon: Wallet, label: "Óradíj", value: `${huCurrency.format(roomPrice(room))} / óra` },
+    ...(price ? [{ Icon: Wallet, label: "Óradíj", value: price }] : []),
   ];
 
   return (
@@ -156,6 +181,10 @@ function RoomModal({ room, onClose, onBook }: { room: Room; onClose: () => void;
             ))}
           </dl>
 
+          {!price && (
+            <p className="mt-3 text-xs text-gray-500">Az óradíjat az óratípus kiválasztása után mutatjuk.</p>
+          )}
+
           {(d.extras?.length ?? 0) > 0 && (
             <ul className="mt-5 flex flex-wrap gap-2">
               {d.extras?.map((x) => (
@@ -167,14 +196,42 @@ function RoomModal({ room, onClose, onBook }: { room: Room; onClose: () => void;
           )}
         </div>
 
-        {/* Nagy kép */}
+        {/* Nagy kép / galéria */}
         <div className="relative h-56 shrink-0 bg-black sm:h-80 lg:h-auto lg:min-h-[560px]">
-          <div
-            className="absolute inset-0 bg-cover bg-center"
-            style={{ backgroundImage: `url('${d.image}')` }}
-            role="img"
-            aria-label={`${room} fotója`}
-          />
+          <AnimatePresence initial={false}>
+            {imageCount > 0 && (
+              <motion.div
+                key={imageIndex}
+                className="absolute inset-0 bg-cover bg-center"
+                style={{ backgroundImage: `url('${mediaUrl(d.images[imageIndex] ?? d.images[0])}')` }}
+                role="img"
+                aria-label={`${d.location} ${d.name} fotója (${imageIndex + 1}/${imageCount})`}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.3 }}
+              />
+            )}
+          </AnimatePresence>
+          {imageCount > 1 && (
+            <>
+              <button type="button" onClick={() => step(-1)} aria-label="Előző kép"
+                className="absolute left-3 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm transition-colors hover:bg-[#40CFD5] hover:text-black focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#40CFD5]/60">
+                <ChevronLeft size={22} />
+              </button>
+              <button type="button" onClick={() => step(1)} aria-label="Következő kép"
+                className="absolute right-3 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm transition-colors hover:bg-[#40CFD5] hover:text-black focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#40CFD5]/60">
+                <ChevronRight size={22} />
+              </button>
+              <div className="absolute inset-x-0 bottom-4 z-10 flex justify-center gap-2">
+                {d.images.map((image, i) => (
+                  <button key={`${image}-${i}`} type="button" onClick={() => setImageIndex(i)}
+                    aria-label={`${i + 1}. kép`} aria-current={i === imageIndex}
+                    className={`h-2.5 rounded-full transition-all ${i === imageIndex ? "w-7 bg-[#40CFD5]" : "w-2.5 bg-white/60 hover:bg-white"}`} />
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
         <button
@@ -191,7 +248,7 @@ function RoomModal({ room, onClose, onBook }: { room: Room; onClose: () => void;
   );
 }
 
-export default function RoomShowcase({ onBook }: { onBook: (room: Room) => void }) {
+export default function RoomShowcase({ onBook, lessonType = null }: { onBook: (room: Room) => void; lessonType?: LessonType | null }) {
   const [openRoom, setOpenRoom] = useState<Room | null>(null);
   const close = useCallback(() => setOpenRoom(null), []);
   // Portál csak a kliensen (hidratálás után) — setState-effekt nélkül.
@@ -207,13 +264,13 @@ export default function RoomShowcase({ onBook }: { onBook: (room: Room) => void 
       </div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:gap-5">
         {rooms.map((room, i) => (
-          <RoomCard key={room} room={room} index={i} onOpen={setOpenRoom} />
+          <RoomCard key={room} room={room} index={i} onOpen={setOpenRoom} lessonType={lessonType} />
         ))}
       </div>
       {/* Portál a <body>-ba, hogy a fix menüsor se lógjon a modal fölé */}
       {mounted &&
         createPortal(
-          <AnimatePresence>{openRoom && <RoomModal room={openRoom} onClose={close} onBook={onBook} />}</AnimatePresence>,
+          <AnimatePresence>{openRoom && <RoomModal room={openRoom} onClose={close} onBook={onBook} lessonType={lessonType} />}</AnimatePresence>,
           document.body,
         )}
     </section>

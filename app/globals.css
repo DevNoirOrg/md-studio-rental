@@ -7,6 +7,10 @@
   --color-md-black: #0d0d0d;
   --color-md-dark: #1a1a1a;
   --color-md-gray: #2a2a2a;
+  /* az admin felülethez (ugyanaz, mint az MD Dance School adminban) */
+  --color-md-pale: #e3f7f8;
+  --color-ink: #0d0d0d;
+  --color-mist: #f4f5f6;
   --font-sans: var(--font-inter), sans-serif;
   --font-anton: var(--font-anton), sans-serif;
 }
@@ -66,4 +70,10 @@ body {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Nyitvatartáson kívüli idősáv a foglalási naptárban (csíkozott, nem választható). */
+.md-closed-slot {
+  background: repeating-linear-gradient(135deg, #f1f2f3 0 6px, #e7e8ea 6px 12px);
+  cursor: not-allowed;
 }

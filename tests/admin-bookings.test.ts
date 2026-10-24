@@ -2,12 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import { NextRequest } from "next/server.js";
-import { createAdminSession, adminCookie } from "../lib/admin-auth.ts";
+import { adminCookie, VALID } from "./stubs/admin-auth.ts";
 import { PGlite } from "@electric-sql/pglite";
 import { readFile } from "node:fs/promises";
 
 const hooks = registerHooks({
   resolve(specifier, context, nextResolve) {
+    if (specifier === "@/lib/rooms-store") return nextResolve(new URL("./stubs/rooms-store.ts", import.meta.url).href, context);
+    if (specifier === "@/lib/admin-auth") return nextResolve(new URL("./stubs/admin-auth.ts", import.meta.url).href, context);
     if (specifier.startsWith("@/")) return nextResolve(new URL(`../${specifier.slice(2)}.ts`, import.meta.url).href, context);
     if (specifier === "next/server") return nextResolve("next/server.js", context);
     return nextResolve(specifier, context);
@@ -27,6 +29,7 @@ test("admin rescheduling preserves room, duration, price and status and atomical
       ADMIN_SESSION_SECRET: "test-secret", SUPABASE_URL: "https://test.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "test-key" });
     await db.exec("create role anon; create role authenticated; create role service_role bypassrls;");
     await db.exec(await readFile(new URL("../supabase/studio-bookings.sql", import.meta.url), "utf8"));
+    await db.exec("set search_path to rental, public");
     const customer = { name: "Test Name", email: "test@example.hu", phone: "+36301234567" };
     const interval = { room: "Opera - Közepes Terem", date: "2099-10-15", hour: 10, durationMinutes: 90, price: 6000 };
     await db.query("select create_studio_request($1,$2,$3,$4)", [
@@ -45,7 +48,7 @@ test("admin rescheduling preserves room, duration, price and status and atomical
       assert.equal(params.get("status"), "in.(pending,approved)");
       const id = params.get("id").slice(3);
       if (options.method === "GET") {
-        const result = await db.query("select id,date::text,hour,duration_minutes from studio_slots where id=$1 and status in ('pending','approved')", [id]);
+        const result = await db.query("select id,room,date::text,hour,duration_minutes from studio_slots where id=$1 and status in ('pending','approved')", [id]);
         if (changeDuringLookup) {
           await db.query("update studio_slots set hour=9 where id=$1", [id]);
           changeDuringLookup = false;
@@ -68,7 +71,7 @@ test("admin rescheduling preserves room, duration, price and status and atomical
         return Response.json({ code: error.code }, { status: 409 });
       }
     };
-    const token = createAdminSession();
+    const token = VALID;
     const patch = (id, body, cookie = token, origin = "http://localhost") => PATCH(new NextRequest(
       `http://localhost/admin/api/bookings?id=${id}`, {
         method: "PATCH", body: typeof body === "string" ? body : JSON.stringify(body),
@@ -153,7 +156,7 @@ test("admin bookings reject unauthenticated access and expose only intended fiel
     assert.equal((await GET(request())).status, 401);
     assert.equal((await GET(request("forged"))).status, 401);
     assert.equal(calls, 0);
-    const token = createAdminSession();
+    const token = VALID;
     assert.equal((await GET(request(token, "from=bad&to=2026-10-25"))).status, 400);
     const response = await GET(request(token));
     assert.equal(response.status, 200);
@@ -167,6 +170,7 @@ test("admin bookings reject unauthenticated access and expose only intended fiel
     try {
       await db.exec("create role anon; create role authenticated; create role service_role bypassrls;");
       await db.exec(await readFile(new URL("../supabase/studio-bookings.sql", import.meta.url), "utf8"));
+    await db.exec("set search_path to rental, public");
       let rpcCalls = 0;
       globalThis.fetch = async (url, options) => {
         assert.equal(url, "https://test.supabase.co/rest/v1/rpc/create_admin_studio_request");
@@ -203,7 +207,7 @@ test("admin bookings reject unauthenticated access and expose only intended fiel
       ] })).status, 409);
       assert.equal((await db.query("select count(*)::int as n from studio_requests")).rows[0].n, 1);
       await db.exec("set role anon");
-      await assert.rejects(db.query("select create_admin_studio_request('{}','privat','x','[]')"), /permission denied/);
+      await assert.rejects(db.query("select rental.create_admin_studio_request('{}','privat','x','[]')"), /permission denied/);
       await db.exec("reset role");
       await db.query("select create_studio_request($1,$2,$3,$4)", [
         input.customer, "privat", "pending-delete-test", [

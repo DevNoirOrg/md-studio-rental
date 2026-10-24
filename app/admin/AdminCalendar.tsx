@@ -2,13 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import BookingTimeline from "@/components/BookingTimeline";
+import BookingTimeline, { timelineRange } from "@/components/BookingTimeline";
 import {
   rooms, isRoom, overlaps, endHour, formatBookingHour, canRescheduleBooking,
   type AdminSlot, type LessonType, type Room, type Slot,
 } from "@/lib/studio-booking";
 import BookingDetails from "./BookingDetails";
 import AdminBookingForm from "./AdminBookingForm";
+import { withBase } from "@/lib/base-path";
+import { openingFor, roomAllows, roomLabel, type RoomsConfig } from "@/lib/room-config";
 
 type CalendarView = "day" | "week" | "month";
 
@@ -22,7 +24,7 @@ function addDays(date: Date, days: number) {
   return result;
 }
 
-export default function AdminCalendar() {
+export default function AdminCalendar({ config }: { config: RoomsConfig }) {
   const [room, setRoom] = useState<Room>(rooms[0]);
   const [date, setDate] = useState(() => dateKey(new Date()));
   const [view, setView] = useState<CalendarView>("week");
@@ -43,15 +45,19 @@ export default function AdminCalendar() {
   const [rescheduleSaving, setRescheduleSaving] = useState(false);
   const rescheduleBusy = useRef(false);
   const rescheduleNotice = useRef<HTMLDivElement>(null);
-  const allowedRooms: readonly string[] = rescheduling ? [rescheduling.room] : lessonType === "csoportos" ? [rooms[0]] : rooms;
-  const validSlot = (slot: Slot) => slot.hour >= 8 && endHour(slot) <= 22 &&
+  // Új foglalásnál csak azok a termek, ahol a választott óratípus engedélyezett (Termek menü).
+  const allowedRooms: readonly string[] = rescheduling ? [rescheduling.room] : rooms.filter((r) => roomAllows(config, r, lessonType));
+  const validSlot = (slot: Slot) => {
+    const opening = openingFor(config, slot.room, slot.date);
+    return !!opening && slot.hour >= opening.open && endHour(slot) <= opening.close &&
     (slot.durationMinutes ?? 60) >= 60 && allowedRooms.includes(slot.room) &&
     new Date(`${slot.date}T00:00:00`).setMinutes(slot.hour * 60) > now.getTime() &&
     !slots.some((other) => overlaps(slot, other));
+  };
   const removeSlot = (target: Slot) => setSelectedSlots((current) => current.filter((slot) => slot !== target));
   const selectSlot = (slot: Slot) => {
     if (rescheduling) {
-      if (ready && !rescheduleBusy.current && canRescheduleBooking(rescheduling, slot, slots, new Date())) {
+      if (ready && !rescheduleBusy.current && canRescheduleBooking(rescheduling, slot, slots, new Date(), config)) {
         setRescheduleTarget(slot);
         setRescheduleError("");
       }
@@ -84,7 +90,7 @@ export default function AdminCalendar() {
   const ready = loadedRange === range && !error;
   const targetValid = ready && !!rescheduling && !!rescheduleTarget &&
     rescheduleTarget.date >= from && rescheduleTarget.date <= to &&
-    canRescheduleBooking(rescheduling, rescheduleTarget, slots, now);
+    canRescheduleBooking(rescheduling, rescheduleTarget, slots, now, config);
   const changeDate = (value: string) => {
     setSelectedId(null);
     setRescheduleTarget(null);
@@ -116,7 +122,7 @@ export default function AdminCalendar() {
     setRescheduleSaving(true);
     setRescheduleError("");
     try {
-      const response = await fetch(`/admin/api/bookings?id=${encodeURIComponent(rescheduling.id)}`, {
+      const response = await fetch(withBase(`/admin/api/bookings?id=${encodeURIComponent(rescheduling.id)}`), {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ date: rescheduleTarget.date, hour: rescheduleTarget.hour }),
       });
@@ -155,7 +161,7 @@ export default function AdminCalendar() {
       if (inFlight) return;
       inFlight = true;
       try {
-        const response = await fetch(`/admin/api/bookings?from=${from}&to=${to}`, {
+        const response = await fetch(withBase(`/admin/api/bookings?from=${from}&to=${to}`), {
           cache: "no-store", signal: controller.signal,
         });
         const result = await response.json();
@@ -191,17 +197,18 @@ export default function AdminCalendar() {
     };
   }, [from, to, range, retry]);
 
+  // A rács a terem heti nyitvatartásához igazodik, de a nyitvatartáson kívüli régi foglalásokat is mutatja.
+  const gridRange = timelineRange(config, room, ready ? slots.filter((slot) => slot.date >= from && slot.date <= to) : []);
+
   return (
-    <section aria-label="Admin foglalási naptár" className="mt-8">
-      <h2 className="section-title text-3xl sm:text-4xl">Teremfoglalások</h2>
-      <p className="mt-3 text-sm text-gray-600">Kattints egy foglalásra a részletekhez, vagy válassz szabad időpontokat új foglaláshoz. A nyilak fél órával bővítik a kijelölést.</p>
+    <section aria-label="Admin foglalási naptár">
       <fieldset disabled={rescheduleSaving} className="min-w-0">
-      <div className="my-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {rooms.map((name) => (
           <button key={name} type="button" disabled={!allowedRooms.includes(name)} aria-pressed={room === name} onClick={() => { setSelectedId(null); setRoom(name); }}
             className={`rounded-2xl border-2 px-4 py-5 text-sm font-extrabold transition-colors disabled:opacity-40 focus-visible:ring-4 focus-visible:ring-[#40CFD5]/40 ${
               room === name ? "border-[#40CFD5] bg-[#40CFD5]/15" : "border-gray-200 bg-white hover:border-[#40CFD5]"
-            }`}>{name}</button>
+            }`}>{roomLabel(config, name)}</button>
         ))}
       </div>
       <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
@@ -227,6 +234,7 @@ export default function AdminCalendar() {
       <div className="mb-5 flex flex-wrap gap-4 text-xs font-semibold text-gray-600">
         <span className="rounded bg-white px-2 py-1 text-gray-700 ring-1 ring-gray-200">Szabad</span>
         <span className="rounded bg-gray-200 px-2 py-1 text-gray-700">Elmúlt időpont</span>
+        <span className="md-closed-slot rounded px-2 py-1 text-gray-700">Zárva</span>
         <span className="rounded bg-amber-100 px-2 py-1 text-amber-900">Jóváhagyásra vár</span>
         <span className="rounded bg-blue-100 px-2 py-1 text-blue-900">Foglalás alatt</span>
       </div>
@@ -237,7 +245,7 @@ export default function AdminCalendar() {
         </p>
       ) : !ready && <p role="status" className="text-sm text-gray-600">Foglalások betöltése…</p>}
       </div>
-      <h3 className="mb-4 text-center text-lg font-extrabold">{room}</h3>
+      <h3 className="mb-4 text-center text-lg font-extrabold">{roomLabel(config, room)}</h3>
       {view === "month" ? (
         <div>
           <h4 className="mb-4 text-center font-bold">
@@ -281,7 +289,7 @@ export default function AdminCalendar() {
                 <div className="border-r border-white/20 bg-black px-2 py-3 text-center text-sm font-bold text-white">
                   {new Intl.DateTimeFormat("hu-HU", { month: "short", day: "numeric", weekday: "short" }).format(day)}
                 </div>
-                <BookingTimeline key={rescheduling?.id ?? "new"} room={room} date={dateKey(day)}
+                <BookingTimeline key={rescheduling?.id ?? "new"} config={config} range={gridRange} room={room} date={dateKey(day)}
                   selectedSlots={rescheduling ? (rescheduleTarget ? [rescheduleTarget] : []) : selectedSlots}
                   reschedulingBooking={rescheduling} readOnly={rescheduleSaving}
                   storedSlots={ready ? slots : []}
@@ -322,7 +330,7 @@ export default function AdminCalendar() {
         </div>
       )}
       {!rescheduling && selectedSlots.length > 0 && (
-        <AdminBookingForm slots={selectedSlots} lessonType={lessonType} ready={ready} onRemove={removeSlot}
+        <AdminBookingForm config={config} slots={selectedSlots} lessonType={lessonType} ready={ready} onRemove={removeSlot}
           onLessonTypeChange={(type) => {
             setLessonType(type);
             setSaved(false);

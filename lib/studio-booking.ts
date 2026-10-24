@@ -1,23 +1,14 @@
 // A stúdiófoglalás közös üzleti logikája (kliens, szerver és tesztek is ezt használják).
 
-export const rooms = [
-  "Astoria - Nagy Terem",
-  "Astoria - Kis Terem",
-  "Opera - Nagy Terem",
-  "Opera - Közepes Terem",
-] as const;
+import {
+  ROOM_IDS, LESSON_TYPES, defaultRoomsConfig, openingFor, roomAllows, hourlyPrice,
+  type Room, type LessonType, type RoomsConfig,
+} from "./room-config.ts";
 
-export type Room = (typeof rooms)[number];
-
-export const roomPrices: Record<Room, number> = {
-  "Astoria - Nagy Terem": 1000,
-  "Astoria - Kis Terem": 2000,
-  "Opera - Nagy Terem": 3000,
-  "Opera - Közepes Terem": 4000,
-};
-
-export const lessonTypeIds = ["privat", "kiscsoportos", "csoportos"] as const;
-export type LessonType = (typeof lessonTypeIds)[number];
+export type { Room, LessonType, RoomsConfig };
+/** A termek fix azonosítói (a megjelenített nevek a terembeállításokban vannak). */
+export const rooms = ROOM_IDS;
+export const lessonTypeIds = LESSON_TYPES;
 
 /** Egy idősáv: terem, nap (YYYY-MM-DD), kezdés órában (fél órás lépés), hossz percben. */
 export interface Slot {
@@ -79,8 +70,9 @@ export function overlaps(a: Slot, b: Slot): boolean {
     a.hour < endHour(b) && b.hour < endHour(a);
 }
 
-export function bookingPrice(slot: Slot): number {
-  return (isRoom(slot.room) ? roomPrices[slot.room] : NaN) * (slot.durationMinutes ?? 60) / 60;
+/** Az idősáv ára: a terem adott óratípusra érvényes óradíja × időtartam. */
+export function bookingPrice(slot: Slot, lessonType: LessonType, config: RoomsConfig = defaultRoomsConfig): number {
+  return hourlyPrice(config, slot.room, lessonType) * (slot.durationMinutes ?? 60) / 60;
 }
 
 export function formatBookingHour(hour: number): string {
@@ -88,14 +80,19 @@ export function formatBookingHour(hour: number): string {
   return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 }
 
+/**
+ * Az idősáv ellenőrzése: formátum, nem múlt el, és (ha a terem ismert) a terem
+ * aznapi nyitvatartásán belül van.
+ */
 export function validateBookingTime(
-  { date, hour, durationMinutes }: { date?: unknown; hour?: unknown; durationMinutes?: unknown },
+  { room, date, hour, durationMinutes }: { room?: unknown; date?: unknown; hour?: unknown; durationMinutes?: unknown },
   now: Date = new Date(),
+  config: RoomsConfig = defaultRoomsConfig,
 ): string | null {
   if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
-      typeof hour !== "number" || !Number.isInteger(hour * 2) || hour < 8 ||
+      typeof hour !== "number" || !Number.isInteger(hour * 2) || hour < 0 ||
       typeof durationMinutes !== "number" || !Number.isInteger(durationMinutes) || durationMinutes < 60 ||
-      durationMinutes % 30 !== 0 || hour + durationMinutes / 60 > 22) {
+      durationMinutes % 30 !== 0 || hour + durationMinutes / 60 > 24) {
     return "Érvénytelen terem vagy idősáv.";
   }
   const parsedDate = new Date(`${date}T00:00:00Z`);
@@ -109,6 +106,13 @@ export function validateBookingTime(
       `${date}T${formatBookingHour(hour)}` <= current) {
     return "Az egyik időpont érvénytelen vagy már elmúlt. Válassz másik idősávot.";
   }
+  if (typeof room === "string") {
+    const opening = openingFor(config, room, date);
+    if (!opening) return "A terem ezen a napon zárva van. Válassz másik napot.";
+    if (hour < opening.open || hour + durationMinutes / 60 > opening.close) {
+      return `A terem aznap ${formatBookingHour(opening.open)} és ${formatBookingHour(opening.close)} között foglalható.`;
+    }
+  }
   return null;
 }
 
@@ -117,15 +121,17 @@ export function canRescheduleBooking(
   target: Slot,
   slots: StoredSlot[],
   now: Date = new Date(),
+  config: RoomsConfig = defaultRoomsConfig,
 ): boolean {
   return target.room === booking.room && target.durationMinutes === booking.durationMinutes &&
-    !validateBookingTime(target, now) &&
+    !validateBookingTime(target, now, config) &&
     !slots.some((slot) => slot.id !== booking.id && overlaps(slot, target));
 }
 
 export function validateBooking(
   input: unknown,
   now: Date = new Date(),
+  config: RoomsConfig = defaultRoomsConfig,
 ): { booking: ValidBooking; error?: undefined } | { error: string; booking?: undefined } {
   if (!input || typeof input !== "object") {
     return { error: "Hiányzó foglalási adatok." };
@@ -157,11 +163,13 @@ export function validateBooking(
   const bookings: PricedSlot[] = [];
   for (const raw of slots as Array<Partial<Slot> | null | undefined>) {
     const durationMinutes = raw?.durationMinutes ?? 60;
-    if (!raw || !isRoom(raw.room) ||
-        (lessonType === "csoportos" && raw.room !== rooms[0])) {
+    if (!raw || !isRoom(raw.room)) {
       return { error: "Érvénytelen terem vagy idősáv." };
     }
-    const timeError = validateBookingTime({ ...raw, durationMinutes }, now);
+    if (!roomAllows(config, raw.room, lessonType as LessonType)) {
+      return { error: "A választott óratípus ebben a teremben nem foglalható." };
+    }
+    const timeError = validateBookingTime({ ...raw, durationMinutes }, now, config);
     if (timeError) return { error: timeError };
     const slot = { room: raw.room, date: raw.date as string, hour: raw.hour as number, durationMinutes };
     const key = `${slot.room}/${slot.date}/${slot.hour}`;
@@ -170,7 +178,7 @@ export function validateBooking(
     if (bookings.some((existing) => overlaps(existing, slot))) {
       return { error: "A kiválasztott időszakok átfedik egymást." };
     }
-    bookings.push({ ...slot, price: bookingPrice(slot) });
+    bookings.push({ ...slot, price: bookingPrice(slot, lessonType as LessonType, config) });
   }
   return {
     booking: {

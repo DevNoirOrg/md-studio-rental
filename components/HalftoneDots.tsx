@@ -1,6 +1,7 @@
 "use client";
 import type React from "react";
 import { motion } from "motion/react";
+import { withBase } from "@/lib/base-path";
 
 export default function HalftoneDots({
   size = 420,
@@ -40,7 +41,7 @@ export default function HalftoneDots({
         style={{
           position: "absolute",
           inset: 0,
-          backgroundImage: "url(/dots-black.png)",
+          backgroundImage: `url(${withBase("/dots-black.png")})`,
           backgroundSize: "contain",
           backgroundPosition: "bottom left",
           backgroundRepeat: "no-repeat",
@@ -52,7 +53,7 @@ export default function HalftoneDots({
         style={{
           position: "absolute",
           inset: 0,
-          backgroundImage: "url(/dots-cyan.png)",
+          backgroundImage: `url(${withBase("/dots-cyan.png")})`,
           backgroundSize: "contain",
           backgroundPosition: "bottom left",
           backgroundRepeat: "no-repeat",

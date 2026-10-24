@@ -1,46 +1,56 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
+import { bookingStore } from "./booking-store.ts";
 
-// Egyszerű admin-belépés: felhasználónév + jelszó környezeti változóból, aláírt (HMAC) session-süti.
+/*
+  Admin belépés e-mailes, egyszer használatos kóddal (Supabase Auth OTP) —
+  ugyanúgy, mint az MD Dance School / MD Dance Company / Under Cover adminban.
+  Admin = bejelentkezett Supabase felhasználó, AKINEK az e-mail címe szerepel a
+  rental.admins táblában (a Supabase projekt közös, a belépés önmagában nem elég).
+*/
 
-export const adminCookie = "md_admin_session";
-export const sessionLifetime = 60 * 60 * 8;
-const developmentSecret = randomBytes(32).toString("hex");
+export type Admin = { email: string };
+type CookieList = { name: string; value: string }[];
 
-function config() {
-  const { ADMIN_USERNAME: username, ADMIN_PASSWORD: password, ADMIN_SESSION_SECRET } = process.env;
-  const secret = ADMIN_SESSION_SECRET ||
-    (process.env.NODE_ENV !== "production" ? developmentSecret : "");
-  if (!username || !password || !secret) {
-    throw new Error("Admin authentication is not configured.");
-  }
-  return { username, password, secret };
+export function supabaseUrl(): string {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+  if (!url) throw new Error("Supabase is not configured.");
+  return url;
 }
 
-function equal(a: string, b: string): boolean {
-  return timingSafeEqual(createHash("sha256").update(a).digest(), createHash("sha256").update(b).digest());
+export function supabaseAuthEnv() {
+  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  if (!key) throw new Error("Admin authentication is not configured (NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY).");
+  return { url: supabaseUrl(), key };
 }
 
-export function checkAdminCredentials(username: string, password: string): boolean {
-  const expected = config();
-  const validUsername = equal(username, expected.username);
-  const validPassword = equal(password, expected.password);
-  return validUsername && validPassword;
+/** Teljes jogú kliens — csak az admin felhasználó létrehozásához (szerveren). */
+export function supabaseServiceClient() {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!key) throw new Error("Supabase is not configured.");
+  return createClient(supabaseUrl(), key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
-export function createAdminSession(now: number = Date.now()): string {
-  const { secret, username, password } = config();
-  const payload = `${Math.floor(now / 1000) + sessionLifetime}.${randomBytes(24).toString("hex")}`;
-  const signature = createHmac("sha256", secret).update(JSON.stringify([payload, username, password])).digest("hex");
-  return `${payload}.${signature}`;
+export async function isAdminEmail(email: string): Promise<boolean> {
+  const rows = await bookingStore<{ email: string }[]>(
+    `admins?select=email&email=eq.${encodeURIComponent(email.toLowerCase())}`,
+  );
+  return rows.length > 0;
 }
 
-export function validAdminSession(token: unknown, now: number = Date.now()): boolean {
-  if (typeof token !== "string" || !/^\d{10}\.[a-f0-9]{48}\.[a-f0-9]{64}$/.test(token)) return false;
-  const [expires, nonce, signature] = token.split(".");
-  if (Number(expires) <= Math.floor(now / 1000) ||
-      Number(expires) > Math.floor(now / 1000) + sessionLifetime) return false;
-  const { secret, username, password } = config();
-  const expected = createHmac("sha256", secret)
-    .update(JSON.stringify([`${expires}.${nonce}`, username, password])).digest("hex");
-  return equal(signature, expected);
+/** A sütikben lévő Supabase munkamenetből az admin (vagy null). Csak olvas, sütit nem ír. */
+export async function adminFromCookies(cookieList: CookieList): Promise<Admin | null> {
+  const { url, key } = supabaseAuthEnv();
+  const supabase = createServerClient(url, key, {
+    cookies: { getAll: () => cookieList, setAll: () => {} },
+  });
+  const { data, error } = await supabase.auth.getUser();
+  const email = data.user?.email?.toLowerCase();
+  if (error || !email) return null;
+  return (await isAdminEmail(email)) ? { email } : null;
+}
+
+/** Route Handlerekhez (a kérés sütijeiből). */
+export function adminFromRequest(request: { cookies: { getAll(): CookieList } }): Promise<Admin | null> {
+  return adminFromCookies(request.cookies.getAll());
 }

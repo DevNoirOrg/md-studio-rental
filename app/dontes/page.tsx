@@ -3,6 +3,7 @@
 import { Suspense, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { withBase } from "@/lib/base-path";
 
 type DecisionAction = "approve" | "reject" | "approve-all";
 interface DecisionInput { token: string | null; action: string | null; slot: string | null }
@@ -42,7 +43,7 @@ function BookingDecision() {
     setSending(true);
     setError("");
     try {
-      const response = await fetch("/api/studio-bookings/decision", {
+      const response = await fetch(withBase("/api/studio-bookings/decision"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input),

@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { SCHOOL_URL } from "@/lib/site";
+import { withBase } from "@/lib/base-path";
 
 /*
   A stúdiófoglaló oldal saját, egyszerű fejléce: MD logó, „Stúdió bérlés” felirat,
@@ -27,7 +28,7 @@ export default function SiteHeader() {
           aria-label="Stúdió bérlés – kezdőoldal"
         >
           <Image
-            src="/brand/logo-md-black-trim.png"
+            src={withBase("/brand/logo-md-black-trim.png")}
             alt="MD Dance School"
             width={273}
             height={219}

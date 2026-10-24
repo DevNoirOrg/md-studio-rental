@@ -1,8 +1,10 @@
+import { withBase } from "./base-path.ts";
 import { endHour, formatBookingHour, type LessonType, type PricedSlot, type Customer } from "./studio-booking.ts";
 
 // A stúdiónak küldött foglalási értesítő e-mail (HTML + szöveges), jóváhagyó/elutasító linkekkel.
 
-export const DECISION_PATH = "/dontes";
+// A basePath (/studio-berles) része az útvonalnak; az APP_BASE_URL csak a domain (pl. https://www.hiphoptanciskola.com).
+export const DECISION_PATH = withBase("/dontes");
 
 export interface EmailBooking {
   customer: Customer;

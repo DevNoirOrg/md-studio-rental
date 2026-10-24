@@ -4,10 +4,13 @@ import type React from "react";
 import { useRef, useState } from "react";
 import { bookingPrice, endHour, formatBookingHour, type LessonType, type Slot } from "@/lib/studio-booking";
 import { Check, UserRound, UsersRound, Users } from "lucide-react";
+import { withBase } from "@/lib/base-path";
+import { roomAllows, roomLabel, type RoomsConfig } from "@/lib/room-config";
 
 const currency = new Intl.NumberFormat("hu-HU", { style: "currency", currency: "HUF", maximumFractionDigits: 0 });
 
 interface AdminBookingFormProps {
+  config: RoomsConfig;
   slots: Slot[];
   lessonType: LessonType;
   ready: boolean;
@@ -22,11 +25,14 @@ const lessonOptions: Array<{ id: LessonType; title: string; capacity: string; Ic
   { id: "csoportos", title: "Csoportos óra", capacity: "36 fő", Icon: Users },
 ];
 
-export default function AdminBookingForm({ slots, lessonType, ready, onRemove, onSaved, onLessonTypeChange }: AdminBookingFormProps) {
+export default function AdminBookingForm({ config, slots, lessonType, ready, onRemove, onSaved, onLessonTypeChange }: AdminBookingFormProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const savingRef = useRef(false);
-  const total = slots.reduce((sum, slot) => sum + bookingPrice(slot), 0);
+  const total = slots.reduce((sum, slot) => sum + bookingPrice(slot, lessonType, config), 0);
+  // Az óratípus csak akkor választható, ha minden kijelölt teremben engedélyezett.
+  const typeAllowed = (type: LessonType) => slots.every((slot) => roomAllows(config, slot.room, type));
+  const lessonTypeOk = typeAllowed(lessonType);
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (savingRef.current || !ready) return;
@@ -36,7 +42,7 @@ export default function AdminBookingForm({ slots, lessonType, ready, onRemove, o
     setSaving(true);
     setError("");
     try {
-      const response = await fetch("/admin/api/bookings", {
+      const response = await fetch(withBase("/admin/api/bookings"), {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ lessonType, slots, customer: {
           name: data.get("name"), email: data.get("email"), phone: data.get("phone"),
@@ -62,20 +68,20 @@ export default function AdminBookingForm({ slots, lessonType, ready, onRemove, o
       <ul className="my-4 space-y-2">
         {slots.map((slot) => (
           <li key={`${slot.room}/${slot.date}/${slot.hour}`} className="flex items-center justify-between gap-3 rounded-xl bg-white p-3 text-sm">
-            <span>{slot.room} · {slot.date} · {formatBookingHour(slot.hour)}–{formatBookingHour(endHour(slot))}
-              <strong className="ml-2">{currency.format(bookingPrice(slot))}</strong></span>
+            <span>{roomLabel(config, slot.room)} · {slot.date} · {formatBookingHour(slot.hour)}–{formatBookingHour(endHour(slot))}
+              {lessonTypeOk && <strong className="ml-2">{currency.format(bookingPrice(slot, lessonType, config))}</strong>}</span>
             <button type="button" disabled={saving} onClick={() => onRemove(slot)} className="font-bold text-red-700 underline">Törlés</button>
           </li>
         ))}
       </ul>
-      <p className="mb-4 font-extrabold">Összesen: {currency.format(total)}</p>
+      {lessonTypeOk && <p className="mb-4 font-extrabold">Összesen: {currency.format(total)}</p>}
       <form onSubmit={submit} className="space-y-4">
         <fieldset disabled={saving}>
           <legend className="mb-3 text-sm font-bold">Óratípus</legend>
           <div className="grid gap-3 sm:grid-cols-3">
             {lessonOptions.map(({ id, title, capacity, Icon }) => {
               const selected = lessonType === id;
-              const unavailable = id === "csoportos" && slots.some((slot) => slot.room !== "Astoria - Nagy Terem");
+              const unavailable = !typeAllowed(id);
               return (
                 <button key={id} type="button" aria-pressed={selected} disabled={unavailable}
                   onClick={() => onLessonTypeChange(id)}
@@ -90,8 +96,10 @@ export default function AdminBookingForm({ slots, lessonType, ready, onRemove, o
               );
             })}
           </div>
-          {slots.some((slot) => slot.room !== "Astoria - Nagy Terem") && (
-            <p className="mt-2 text-xs text-gray-600">Csoportos óra csak az Astoria - Nagy Teremben foglalható.</p>
+          {!lessonTypeOk && (
+            <p role="alert" className="mt-2 text-sm font-semibold text-red-700">
+              A kiválasztott óratípus nem minden kijelölt teremben foglalható — válassz másikat (a Termek menüben állítható).
+            </p>
           )}
         </fieldset>
         <fieldset disabled={saving} className="grid gap-4 sm:grid-cols-3">
@@ -101,7 +109,7 @@ export default function AdminBookingForm({ slots, lessonType, ready, onRemove, o
         </fieldset>
         <p className="text-sm text-gray-600">A foglalás azonnal „Foglalás alatt” állapotba kerül.</p>
         {error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{error}</p>}
-        <button type="submit" disabled={saving || !ready} className="rounded-xl bg-[#40CFD5] px-5 py-3 font-extrabold disabled:opacity-50">
+        <button type="submit" disabled={saving || !ready || !lessonTypeOk} className="rounded-xl bg-[#40CFD5] px-5 py-3 font-extrabold disabled:opacity-50">
           {saving ? "Mentés…" : "Foglalás mentése"}
         </button>
       </form>

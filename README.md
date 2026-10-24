@@ -7,7 +7,10 @@ Stack: Next.js 16 (App Router, Turbopack), React 19, TypeScript, Tailwind CSS 4,
 | --- | --- |
 | `/` | Room cards, lesson type, calendar and booking request |
 | `/dontes` | Confirmation page behind the approve/reject links in notification emails |
-| `/admin` | Admin login + booking calendar (create, reschedule, delete) |
+| `/admin` | Admin → **Foglalások**: booking calendar (create, reschedule, delete) |
+| `/admin/termek` | Admin → **Termek**: room texts, images, lesson types, prices per lesson type, weekly opening hours |
+| `/admin/adminok` | Admin → **Adminok**: who can sign in |
+| `/admin/belepes` | Admin login (one-time e-mail code) |
 | `/adatkezeles` | Privacy policy (sample text, must be finalised) |
 | `/api/studio-bookings` | Public availability (GET) and booking request (POST) |
 | `/api/studio-bookings/decision` | Email decision (POST) |
@@ -23,14 +26,32 @@ npm run dev
 
 Open http://localhost:3000. Other scripts: `npm run typecheck`, `npm run lint`, `npm test`, `npm run build`.
 
+## Two domains, one canonical URL
+
+The app runs under the base path **`/studio-berles`** (`next.config.ts`) and is reachable at:
+
+- `https://www.hiphoptanciskola.com/studio-berles` — the school site forwards `/studio-berles/*` here
+  (Next.js multi-zones, `STUDIO_RENTAL_ORIGIN` in md-dance-school). This is the **canonical** URL
+  (it has the old, well-ranked SEO); every page sets `<link rel="canonical">` to it (`lib/base-path.ts`).
+- `https://mddancestudio.com` — the same app on its own domain; `/` redirects to `/studio-berles`.
+
+Use `withBase()` for `fetch`, plain `<a>`, images and CSS `url()`; `next/link` and the router add the
+base path themselves. The admin is at `…/studio-berles/admin`; decision links are
+`${APP_BASE_URL}/studio-berles/dontes` (so links in emails sent before the move keep working).
+On hiphoptanciskola.com the admin login shares the Supabase session cookie with the school admin
+(same Supabase project); each app still checks its own admin list.
+
 ## Moving from md-dance-school
 
-- Uses the **same Supabase project and tables** and the **same Resend account** as before; no data migration is needed.
+- Uses the **same Supabase project** and the **same Resend account** as before. The tables now live in the
+  `rental` schema: rerun `supabase/studio-bookings.sql` once — it moves the existing `public` tables
+  into `rental` without losing data — and add `rental` to Supabase → Project Settings → Data API →
+  **Exposed schemas** (the app talks to PostgREST with `Accept-Profile: rental`).
 - Set `APP_BASE_URL` to this site's public URL, so new emails link to `/dontes` here.
 - `NEXT_PUBLIC_SCHOOL_URL` is the "back to MD Dance School" link in the header/footer.
 - The school site redirects `/studio-berles` → this site and `/studio-berles/dontes?…` → `/dontes?…`
   (set `NEXT_PUBLIC_STUDIO_RENTAL_URL` there), so links in emails sent before the move keep working.
-- Admin credentials (`ADMIN_*`) move here; the school site no longer has an `/admin` page.
+- The rental admin is at `<this site>/admin`. (The school site's `/admin` is now the school's own content admin.)
 
 ## Booking notifications with Resend
 
@@ -90,11 +111,46 @@ Before a public production launch, add abuse protection/rate limiting and define
 
 Do not run `npm run build` while `next dev` is running: both use `.next`.
 
+## Admin panel
+
+Same look as the MD Dance School admin: dark left sidebar (**Foglalások**, **Termek**, **Adminok**),
+cards and a sticky save bar showing who saved last.
+
+**Termek** edits the four fixed rooms (rooms cannot be added or removed; the internal id such as
+`Astoria - Nagy Terem` never changes because bookings reference it — only the displayed texts do):
+location, name, description, multiple images (the first is the card image, the rest form the gallery
+in the room modal; uploads are converted to WebP in the browser and stored in the public Supabase
+Storage bucket `rental`), dimensions, capacity, equipment, extras, which lesson types can be booked,
+the hourly price **per lesson type**, and opening hours per weekday (half-hour steps, or closed).
+Settings live in `rental.rooms` (`data` jsonb, merged over the defaults in `lib/room-config.ts`, so an
+empty `{}` row is valid). Price changes only affect new bookings (stored bookings keep their price).
+If narrowed opening hours or a disabled lesson type affect existing future bookings, saving still
+succeeds, the bookings are kept, and a warning names how many are affected.
+
+The public page shows no price on room cards or in the room modal until a lesson type is chosen;
+afterwards the cards, modal, calendar and summary show that lesson type's price. Lesson types that no
+room allows are shown disabled. The page reads the settings with a tagged cache that the admin save
+refreshes immediately; if the database is unreachable it falls back to the defaults. Booking
+validation (public and admin API) always reads fresh settings.
+
+**Adminok** adds/removes admins (you cannot remove yourself or the last admin).
+
 ## Admin login
 
-Visit `/admin` to sign in. Set server-only `ADMIN_USERNAME` and `ADMIN_PASSWORD` in
-`.env.local` (and in the hosting provider's environment for deployment). No credentials
-are embedded in client code. After login, a day/week/month calendar shows the four rooms'
+Visit `/admin` (redirects to `/admin/belepes`) and sign in with a **one-time e-mail code** (Supabase Auth OTP) — the same login
+as on the MD Dance School, MD Dance Company and Under Cover admins. There is no password.
+Only addresses listed in `rental.admins` can sign in; add one in the SQL Editor:
+
+```sql
+insert into rental.admins (email) values ('valaki@pelda.hu');
+```
+
+Required settings: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (plus the
+existing `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`). In Supabase → Authentication: e-mail sign-in on,
+public sign-ups off (the app creates admin users with the service-role key), the Magic Link template
+contains `{{ .Token }}`, and `https://<this site>/admin/auth/callback` is an allowed redirect URL.
+The old `ADMIN_USERNAME` / `ADMIN_PASSWORD` / `ADMIN_SESSION_SECRET` variables are no longer used.
+After login, a day/week/month calendar shows the four rooms'
 pending and approved bookings using a session-protected `/admin/api/bookings` endpoint.
 Click a booking to open a right-hand details panel (full-width on mobile) with its interval,
 lesson type, price, status and customer contact details. Close with X, Escape, or a click
@@ -107,11 +163,11 @@ selection is disabled until the new range loads, and old-range bookings are hidd
 Admins can select future intervals, extend them in half-hour steps, choose a lesson type,
 and enter customer contact details. Clicking a selected admin interval again removes it;
 the customer calendar keeps its X removal control. Lesson types are chosen with cards alongside
-the contact form; the group card is disabled if a selected interval is outside Astoria - Nagy Terem.
+the contact form; a lesson type card is disabled if a selected room does not allow it (Termek menu).
 Saving uses the session-protected, same-origin POST endpoint
 and the `create_admin_studio_request` RPC to atomically create approved (“Foglalás alatt”)
-slots without sending email. Prices and overlaps are validated server-side; group lessons
-remain restricted to Astoria - Nagy Terem. Pending and approved intervals can be permanently deleted from the details panel after
+slots without sending email. Prices, opening hours, allowed lesson types and overlaps are
+validated server-side. Pending and approved intervals can be permanently deleted from the details panel after
 confirmation. Only the chosen slot is removed; other slots and the parent request are retained.
 Deletion releases its half-hour occupancy units, sends no email, and requires an authenticated
 same-origin DELETE request. No additional SQL migration is required for deletion.
@@ -120,37 +176,32 @@ the details panel, then choosing a new start directly on the calendar and confir
 The rescheduling controls appear below the calendar, in the same area as the new-booking form.
 The panel closes to expose the calendar; room switching is locked, but day/week/month navigation
 remains available. The mouse/keyboard preview uses the original duration: turquoise means the
-whole interval fits; red means overlap, past time, or a finish after 22:00, and cannot be selected.
+whole interval fits; red means overlap, past time, or outside the room's opening hours, and cannot be selected.
 Touch users select a valid start by tapping. The original booking is excluded from conflict checks,
 so a partially overlapping move of the same booking is allowed. Cancel leaves it unchanged.
 The authenticated, same-origin PATCH endpoint changes only
 the date and start time: room, duration, price, status and customer data are preserved.
-Only future intervals within 08:00–22:00 are allowed. Existing occupancy triggers atomically
+Only future intervals within the room's opening hours for that day are allowed. Existing occupancy triggers atomically
 release the old time and reserve the new one; overlaps roll back the entire update, preserving
 the original booking. Conditional updates detect concurrent rescheduling or deletion.
 After saving, the calendar opens the new date. No email is sent and no additional SQL is needed.
 Run the updated `supabase/studio-bookings.sql` before using admin creation; it adds this RPC
 without deleting bookings. The customer booking/email approval flow remains unchanged.
 
-Production also requires a random `ADMIN_SESSION_SECRET` (generate with
-`openssl rand -hex 32`). Development uses an ephemeral signing key, so restarting the
-server invalidates local sessions. Sessions expire after eight hours and use an HttpOnly,
-SameSite cookie, with Secure enabled in production. Changing credentials invalidates sessions.
-Use strong credentials instead of the local test pair before public deployment, and add
-rate limiting before exposing this test admin login publicly.
-Future admin pages and APIs must verify the session server-side before returning protected data.
-
-`npm test` also covers credential and session validation (`tests/admin-auth.test.ts`).
+`proxy.ts` refreshes the Supabase session on `/admin` routes; the admin page and every
+`/admin/api/bookings` method verify the session and the `rental.admins` entry server-side.
+`npm test` covers the admin lookup (`tests/admin-auth.test.ts`); the booking API tests stub the session.
 
 ## Calendar interval selection
 
 After choosing a lesson type, customers choose from four room cards before the calendar appears.
-Group lessons can select only Astoria - Nagy Terem; the other cards remain visible but disabled.
+Only rooms that allow the chosen lesson type are offered (set per room in the admin).
 Changing rooms preserves selected intervals; changing lesson types starts a new selection.
-Choosing a room scrolls to the current local half-hour row between 08:00 and 22:00,
-or to 08:00 outside opening hours. In monthly view it scrolls to the calendar instead.
+Choosing a room scrolls to the current local half-hour row within the room's opening hours,
+or to the opening time outside them. In monthly view it scrolls to the calendar instead.
 
-Daily and weekly views use a continuous half-hour grid from 08:00 to 22:00.
+Daily and weekly views use a continuous half-hour grid spanning the room's earliest opening and
+latest closing time of the week; rows outside that day's opening hours (or closed days) are hatched.
 Hover previews one hour with a translucent highlight; click selects it.
 Preview and selected blocks have no visible time-range or price labels, keeping the underlying
 calendar times readable. Selected intervals and prices remain in the booking summary.

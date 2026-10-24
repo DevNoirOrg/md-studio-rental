@@ -3,12 +3,13 @@ import Link from "next/link";
 import { Mail, MapPin, Phone } from "lucide-react";
 import { CONTACT, SCHOOL_URL } from "@/lib/site";
 import { PRIVACY_URL } from "@/lib/privacy";
+import { withBase } from "@/lib/base-path";
 
 export default function SiteFooter() {
   return (
     <footer className="relative z-20 border-t border-black/5 bg-white px-5 pb-8 pt-14">
       <div className="mx-auto flex max-w-6xl flex-col items-center gap-8 text-center">
-        <Image src="/brand/logo-md-black-trim.png" alt="MD Dance School" width={273} height={219} className="h-24 w-auto" />
+        <Image src={withBase("/brand/logo-md-black-trim.png")} alt="MD Dance School" width={273} height={219} className="h-24 w-auto" />
         <ul className="space-y-3 text-base text-gray-900 sm:text-lg">
           <li className="flex items-center justify-center gap-2">
             <Mail size={18} className="text-[#087c81]" aria-hidden="true" />

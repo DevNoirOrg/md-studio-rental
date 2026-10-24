@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { endHour, formatBookingHour, type AdminSlot, type LessonType } from "@/lib/studio-booking";
+import { withBase } from "@/lib/base-path";
 
 const lessonNames: Record<LessonType, string> = { privat: "Privát óra", kiscsoportos: "Kiscsoportos óra", csoportos: "Csoportos óra" };
 const currency = new Intl.NumberFormat("hu-HU", { style: "currency", currency: "HUF", maximumFractionDigits: 0 });
@@ -32,7 +33,7 @@ export default function BookingDetails({ booking, onClose, onDeleted, onStartRes
     setDeleting(true);
     setError("");
     try {
-      const response = await fetch(`/admin/api/bookings?id=${encodeURIComponent(booking.id)}`, { method: "DELETE" });
+      const response = await fetch(withBase(`/admin/api/bookings?id=${encodeURIComponent(booking.id)}`), { method: "DELETE" });
       const result = await response.json();
       if (!response.ok || result.success !== true) {
         setError(result.error || "A foglalás nem törölhető.");
