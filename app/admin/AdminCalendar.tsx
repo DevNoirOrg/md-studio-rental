@@ -24,9 +24,14 @@ function addDays(date: Date, days: number) {
   return result;
 }
 
-export default function AdminCalendar({ config }: { config: RoomsConfig }) {
-  const [room, setRoom] = useState<Room>(rooms[0]);
-  const [date, setDate] = useState(() => dateKey(new Date()));
+export default function AdminCalendar({ config, initialDate, initialRoom }: {
+  config: RoomsConfig;
+  /** A Google Naptár eseményéből nyitott link: ?datum=YYYY-MM-DD&terem=<index> */
+  initialDate?: string;
+  initialRoom?: Room;
+}) {
+  const [room, setRoom] = useState<Room>(initialRoom ?? rooms[0]);
+  const [date, setDate] = useState(() => initialDate ?? dateKey(new Date()));
   const [view, setView] = useState<CalendarView>("week");
   const [slots, setSlots] = useState<AdminSlot[]>([]);
   const [error, setError] = useState("");

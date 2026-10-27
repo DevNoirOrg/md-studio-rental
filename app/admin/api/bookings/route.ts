@@ -4,6 +4,7 @@ import { bookingStore } from "@/lib/booking-store";
 import { randomBytes } from "node:crypto";
 import { validateBooking, validateBookingTime } from "@/lib/studio-booking";
 import { loadRoomsConfig } from "@/lib/rooms-store";
+import { scheduleCalendarSync } from "@/lib/calendar-schedule";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,9 @@ interface AdminSlotRow {
   status: string;
   price: number;
   duration_minutes: number;
+  gcal_dirty?: boolean;
+  gcal_synced_at?: string | null;
+  gcal_error?: string | null;
   studio_requests: { customer: { name: string; email: string; phone: string }; lesson_type: string };
 }
 
@@ -65,6 +69,7 @@ export async function PATCH(request: NextRequest) {
     if (updated.length === 0) {
       return NextResponse.json({ error: "A foglalás közben megváltozott. Frissítsd a naptárt és próbáld újra." }, { status: 409, headers });
     }
+    scheduleCalendarSync();
     return NextResponse.json({ success: true, slot: updated[0] }, { headers });
   } catch (caught) {
     const error = caught as { code?: string; name?: string };
@@ -96,6 +101,7 @@ export async function DELETE(request: NextRequest) {
     if (deleted.length === 0) {
       return NextResponse.json({ error: "A foglalás már nem található vagy nem törölhető. Frissítsd a naptárt." }, { status: 404, headers });
     }
+    scheduleCalendarSync();
     return NextResponse.json({ success: true }, { headers });
   } catch (caught) {
     const error = caught as { code?: string; name?: string };
@@ -126,6 +132,7 @@ export async function POST(request: NextRequest) {
       body: { p_customer: booking.customer, p_lesson_type: booking.lessonType,
         p_token_hash: randomBytes(32).toString("hex"), p_slots: booking.slots },
     });
+    scheduleCalendarSync();
     return NextResponse.json({ success: true }, { headers });
   } catch (caught) {
     const error = caught as { code?: string; name?: string };
@@ -155,9 +162,10 @@ export async function GET(request: NextRequest) {
     }
     const slots: Array<Record<string, unknown>> = [];
     for (let offset = 0; ; offset += 500) {
-      const page = await bookingStore<AdminSlotRow[]>(`studio_slots?select=id,room,date,hour,status,price,duration_minutes,studio_requests!inner(customer,lesson_type)&date=gte.${from}&date=lte.${to}&status=in.(pending,approved)&order=date,hour,room,id&limit=500&offset=${offset}`);
-      slots.push(...page.map(({ duration_minutes, studio_requests, ...slot }) => ({
+      const page = await bookingStore<AdminSlotRow[]>(`studio_slots?select=id,room,date,hour,status,price,duration_minutes,gcal_dirty,gcal_synced_at,gcal_error,studio_requests!inner(customer,lesson_type)&date=gte.${from}&date=lte.${to}&status=in.(pending,approved)&order=date,hour,room,id&limit=500&offset=${offset}`);
+      slots.push(...page.map(({ duration_minutes, studio_requests, gcal_dirty, gcal_synced_at, gcal_error, ...slot }) => ({
         ...slot, durationMinutes: duration_minutes,
+        calendar: { pending: !!gcal_dirty, synced: !!gcal_synced_at, error: gcal_error ?? null },
         customer: {
           name: studio_requests.customer.name,
           email: studio_requests.customer.email,

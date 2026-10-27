@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { bookingStore, decisionInput } from "@/lib/booking-store";
+import { scheduleCalendarSync } from "@/lib/calendar-schedule";
 
 export const runtime = "nodejs";
 
@@ -19,6 +20,8 @@ export async function POST(request: Request) {
     if (!result) {
       return NextResponse.json({ error: "A foglalási igény nem található, vagy a hivatkozás érvénytelen." }, { status: 404 });
     }
+    // jóváhagyott idősáv → a terem Google Naptárába (a válasz után, a háttérben)
+    if (result.changed > 0 && decision.p_action !== "reject") scheduleCalendarSync();
     return NextResponse.json({ success: true, changed: result.changed });
   } catch (caught) {
     const error = caught as { code?: string; status?: number; name?: string; message?: string };

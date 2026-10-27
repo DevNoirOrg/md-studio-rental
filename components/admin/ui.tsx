@@ -149,7 +149,7 @@ export function useSaver() {
       try {
         const res = await fn();
         if (res.ok) {
-          setStatus(res.warning ? { type: "warn", text: res.warning } : { type: "ok", text: okText });
+          setStatus(res.warning ? { type: "warn", text: res.warning } : { type: "ok", text: res.message ?? okText });
           onOk?.(res);
           router.refresh();
         } else {

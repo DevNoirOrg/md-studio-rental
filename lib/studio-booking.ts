@@ -42,6 +42,8 @@ export interface AdminSlot {
   price: number;
   lessonType: LessonType;
   customer: Customer;
+  /** Google Naptár állapot: pending = szinkronra vár, synced = bent van a naptárban. */
+  calendar?: { pending: boolean; synced: boolean; error: string | null };
 }
 
 export interface PricedSlot extends Required<Pick<Slot, "room" | "date" | "hour" | "durationMinutes">> {

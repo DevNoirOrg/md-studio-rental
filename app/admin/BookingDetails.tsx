@@ -92,6 +92,17 @@ export default function BookingDetails({ booking, onClose, onDeleted, onStartRes
         </dd></div>
         <div><dt className="text-gray-500">Óratípus</dt><dd className="mt-1 font-bold">{lessonNames[booking.lessonType]}</dd></div>
         <div><dt className="text-gray-500">Ár</dt><dd className="mt-1 text-lg font-extrabold text-[#087c81]">{currency.format(booking.price)}</dd></div>
+        {booking.status === "approved" && booking.calendar && (
+          <div><dt className="text-gray-500">Google Naptár</dt><dd className="mt-1 font-bold">
+            {booking.calendar.pending ? (
+              booking.calendar.error ? (
+                <span className="text-red-700">Nem sikerült beírni — {booking.calendar.error}</span>
+              ) : <span className="text-amber-700">Szinkronizálásra vár</span>
+            ) : booking.calendar.synced ? (
+              <span className="text-emerald-700">✓ Bent van a terem naptárában</span>
+            ) : <span className="text-gray-500">Nincs a naptárban (a bekötés előtti foglalás)</span>}
+          </dd></div>
+        )}
       </dl>
       <div className="mt-8 border-t border-gray-200 pt-6">
         <button type="button" disabled={busy} onClick={() => onStartReschedule(booking)}

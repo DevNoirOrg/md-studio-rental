@@ -135,6 +135,21 @@ validation (public and admin API) always reads fresh settings.
 
 **Adminok** adds/removes admins (you cannot remove yourself or the last admin).
 
+## Google Calendar sync
+
+Approved bookings are written one-way into each room's existing Google Calendar (one event per
+slot; reschedule moves it, delete removes it; pending/rejected requests are not written; manual
+events in the calendars are not read). A service account writes the events; configuration is
+server-only env: `GOOGLE_SERVICE_ACCOUNT_JSON` and `GOOGLE_CALENDAR_ASTORIA_NAGY` /
+`_ASTORIA_KIS` / `_OPERA_NAGY` / `_OPERA_KOZEPES`. Without them the sync is disabled.
+
+Database triggers mark what needs syncing (`studio_slots.gcal_dirty`, `rental.gcal_deletions`); the
+event id is derived from the slot id, so syncing is idempotent. The sync runs after each approval
+(email link), after admin create/reschedule/delete, when the admin Foglalások page loads, and via the
+“Szinkronizálás most” button. Bookings never fail because of Google; failures are stored
+(`gcal_error`) and retried. Step-by-step setup (Hungarian, incl. admin notification settings):
+[GOOGLE-NAPTAR.md](GOOGLE-NAPTAR.md). Tests: `tests/google-calendar.test.ts`.
+
 ## Admin login
 
 Visit `/admin` (redirects to `/admin/belepes`) and sign in with a **one-time e-mail code** (Supabase Auth OTP) — the same login

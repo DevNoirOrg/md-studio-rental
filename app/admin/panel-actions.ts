@@ -13,6 +13,7 @@ import {
 } from "@/lib/room-config";
 import { ROOMS_TAG } from "@/lib/rooms-store";
 import { endHour, formatBookingHour } from "@/lib/studio-booking";
+import { syncCalendar } from "@/lib/google-calendar";
 
 /*
   Az admin felület (Termek, Adminok) írási műveletei. Mindegyik:
@@ -182,5 +183,24 @@ export async function removeAdmin(emailInput: string): Promise<ActionResult> {
     const admins = await bookingStore<{ email: string }[]>("admins?select=email");
     if (admins.length <= 1) return fail("Az utolsó admint nem lehet eltávolítani.");
     await bookingStore(`admins?email=eq.${encodeURIComponent(email)}`, { method: "DELETE" });
+  });
+}
+
+// ---------------------------------------------------------------------
+//  Google Naptár — kézi szinkron (Foglalások oldal)
+// ---------------------------------------------------------------------
+export async function syncCalendarNow(): Promise<ActionResult> {
+  return run(async () => {
+    const result = await syncCalendar();
+    if (!result.configured) return fail("A Google Naptár nincs bekötve (Vercel környezeti változók).");
+    if (result.failed) {
+      return fail(`${result.failed} bejegyzést nem sikerült szinkronizálni: ${result.error ?? "ismeretlen hiba"}`);
+    }
+    return {
+      ok: true,
+      message: result.written || result.removed
+        ? `Kész: ${result.written} bejegyzés frissítve, ${result.removed} törölve a naptárakból.`
+        : undefined,
+    };
   });
 }

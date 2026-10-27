@@ -65,6 +65,8 @@ create table if not exists rental.studio_slots (
 
 lock table rental.studio_slots in access exclusive mode;
 drop trigger if exists studio_slot_units_sync on rental.studio_slots;
+-- (a lenti Google Naptár trigger is az oszlopokra hivatkozik → átalakítás előtt eldobjuk, lent újra létrejön)
+drop trigger if exists studio_slots_gcal_dirty on rental.studio_slots;
 alter table rental.studio_slots add column if not exists duration_minutes integer not null default 60;
 alter table rental.studio_slots drop constraint if exists studio_slots_hour_check;
 alter table rental.studio_slots alter column hour type numeric(3,1);
@@ -189,6 +191,57 @@ end;
 $$;
 revoke all on function rental.create_admin_studio_request(jsonb, text, text, jsonb) from public, anon, authenticated;
 grant execute on function rental.create_admin_studio_request(jsonb, text, text, jsonb) to service_role;
+
+-- ---------------------------------------------------------------------
+--  Google Naptár szinkron (egyirányú: a foglalási rendszer → a termek Google Naptárai)
+--  Csak a jóváhagyott („Foglalás alatt”) idősávok kerülnek a naptárba. Az esemény
+--  azonosítója az idősáv azonosítójából képződik, így a szinkron megismételhető.
+--    gcal_dirty     — a naptárat frissíteni kell (új jóváhagyás, átfoglalás, státuszváltás)
+--    gcal_synced_at — mikor írtuk utoljára sikeresen a naptárba
+--    gcal_error     — az utolsó sikertelen próbálkozás hibája
+--  A törölt idősávok eseményét a gcal_deletions sor alapján távolítja el a szinkron.
+-- ---------------------------------------------------------------------
+alter table rental.studio_slots add column if not exists gcal_dirty boolean not null default false;
+alter table rental.studio_slots add column if not exists gcal_synced_at timestamptz;
+alter table rental.studio_slots add column if not exists gcal_error text;
+create index if not exists studio_slots_gcal_dirty on rental.studio_slots(id) where gcal_dirty;
+
+create table if not exists rental.gcal_deletions (
+  slot_id    uuid primary key,
+  room       text not null,
+  created_at timestamptz not null default now()
+);
+alter table rental.gcal_deletions enable row level security;
+revoke all on rental.gcal_deletions from anon, authenticated;
+grant all on rental.gcal_deletions to service_role;
+
+create or replace function rental.gcal_mark_dirty()
+returns trigger language plpgsql security invoker set search_path = rental as $$
+begin
+  if new.status = 'approved' or (tg_op = 'UPDATE' and (old.status = 'approved' or old.gcal_synced_at is not null)) then
+    new.gcal_dirty := true;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists studio_slots_gcal_dirty on rental.studio_slots;
+create trigger studio_slots_gcal_dirty before insert or update of room, date, hour, duration_minutes, status
+  on rental.studio_slots for each row execute function rental.gcal_mark_dirty();
+
+create or replace function rental.gcal_queue_deletion()
+returns trigger language plpgsql security invoker set search_path = rental as $$
+begin
+  if old.status = 'approved' or old.gcal_synced_at is not null then
+    insert into gcal_deletions(slot_id, room) values (old.id, old.room) on conflict (slot_id) do nothing;
+  end if;
+  return old;
+end;
+$$;
+drop trigger if exists studio_slots_gcal_deletion on rental.studio_slots;
+create trigger studio_slots_gcal_deletion after delete on rental.studio_slots
+  for each row execute function rental.gcal_queue_deletion();
+revoke all on function rental.gcal_mark_dirty() from public, anon, authenticated;
+revoke all on function rental.gcal_queue_deletion() from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------
 --  Adminok — csak az itt szereplő e-mail címek léphetnek be a /admin felületre
