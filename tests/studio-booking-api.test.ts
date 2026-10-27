@@ -119,10 +119,10 @@ test("booking API and real PostgreSQL transactions cover decisions, conflicts an
       }
       assert.ok(parsed.pathname.endsWith("/studio_slots"));
       if (failReads) return Response.json({ code: "test_outage" }, { status: 503 });
-      assert.equal(parsed.searchParams.get("select"), "room,date,hour,status,duration_minutes");
+      assert.equal(parsed.searchParams.get("select"), "room,date,hour,duration_minutes");
       const dates = parsed.searchParams.getAll("date").map((value) => value.slice(4));
       const result = await db.query(
-        "select room, to_char(date, 'YYYY-MM-DD') as date, hour::float as hour, status, duration_minutes from studio_slots where date >= $1 and date <= $2 and status in ('pending', 'approved') order by date, hour, room limit $3 offset $4",
+        "select room, to_char(date, 'YYYY-MM-DD') as date, hour::float as hour, duration_minutes from studio_slots where date >= $1 and date <= $2 and status in ('pending', 'approved') order by date, hour, room limit $3 offset $4",
         [dates[0], dates[1], Number(parsed.searchParams.get("limit")), Number(parsed.searchParams.get("offset"))],
       );
       return Response.json(result.rows);
@@ -173,8 +173,8 @@ test("booking API and real PostgreSQL transactions cover decisions, conflicts an
       assert.ok(payload.html.includes("Óratípus:</strong> Privát óra"));
       const available = await (await GET(calendarRequest())).json();
       assert.equal(available.slots.length, 3);
-      assert.ok(available.slots.every((slot) => slot.status === "pending"));
-      assert.ok(available.slots.every((slot) => Object.keys(slot).sort().join(",") === "date,durationMinutes,hour,room,status"));
+      // a látogató nem látja az állapotot (jóváhagyásra vár / jóváhagyva) — csak hogy foglalt
+      assert.ok(available.slots.every((slot) => Object.keys(slot).sort().join(",") === "date,durationMinutes,hour,room"));
       const stored = (await db.query("select token_hash from studio_requests")).rows[0];
       const rawToken = new URL(payload.text.match(/Jóváhagyás: (\S+)/)[1]).searchParams.get("token");
       assert.equal(stored.token_hash.length, 64);
@@ -206,7 +206,7 @@ test("booking API and real PostgreSQL transactions cover decisions, conflicts an
       assert.deepEqual(states.sort(), ["approved", "approved", "rejected"]);
       const publicSlots = (await (await GET(calendarRequest())).json()).slots;
       assert.equal(publicSlots.length, 2);
-      assert.ok(publicSlots.every((slot) => slot.status === "approved"));
+      assert.ok(publicSlots.every((slot) => slot.status === undefined)); // az elutasított nem foglal, az állapot rejtett
       const rejected = (await db.query("select room, to_char(date, 'YYYY-MM-DD') as date, hour::float as hour from studio_slots where status='rejected'")).rows[0];
       assert.equal((await POST(request({ ...input(), slots: [rejected] }))).status, 200);
       assert.equal((await db.query("select count(*)::integer as n from studio_slots where status='pending'")).rows[0].n, 1);

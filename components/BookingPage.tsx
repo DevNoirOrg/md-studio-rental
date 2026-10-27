@@ -110,14 +110,14 @@ function isPastSlot(date: Date, hour: number, now = new Date()) {
 
 // A havi összesítésből a foglalt, elmúlt, zárt és jóváhagyásra váró sávok is kimaradnak.
 // (Egyórás kezdési lehetőségek félóránként, a terem aznapi nyitvatartásán belül.)
-function getAvailableHourCount(config: RoomsConfig, room: string, date: Date, now: Date, pendingSlots: StoredSlot[], approvedSlots: StoredSlot[]) {
+function getAvailableHourCount(config: RoomsConfig, room: string, date: Date, now: Date, bookedSlots: StoredSlot[]) {
   const opening = openingFor(config, room, dateKey(date));
   if (!opening) return 0;
   const starts = Array.from({ length: Math.max(0, (opening.close - opening.open - 1) * 2 + 1) }, (_, index) => opening.open + index / 2);
   return starts.filter(
     (hour) =>
       !isPastSlot(date, hour, now) &&
-      ![...pendingSlots, ...approvedSlots].some(
+      !bookedSlots.some(
         (slot) =>
           overlaps(slot, { room, date: dateKey(date), hour, durationMinutes: 60 }),
       ),
@@ -478,8 +478,6 @@ function StudioCalendar({ lessonType, initialRoom, roomRequest }: { lessonType: 
   const hasSelectedSlots = selectedSlots.length > 0;
   const hasMultipleSlots = selectedSlots.length > 1;
   const [storedSlots, setStoredSlots] = useState<StoredSlot[]>([]);
-  const pendingSlots = storedSlots.filter((slot) => slot.status === "pending");
-  const approvedSlots = storedSlots.filter((slot) => slot.status === "approved");
   const [availabilityError, setAvailabilityError] = useState("");
   const [loadedRange, setLoadedRange] = useState("");
   const [refreshVersion, setRefreshVersion] = useState(0);
@@ -1012,14 +1010,6 @@ function StudioCalendar({ lessonType, initialRoom, roomRequest }: { lessonType: 
 
               <li className="flex items-center gap-1.5">
 
-                <span className="h-3 w-3 rounded bg-amber-200 ring-1 ring-amber-400" />
-
-                Jóváhagyásra vár
-
-              </li>
-
-              <li className="flex items-center gap-1.5">
-
                 <span className="h-3 w-3 rounded bg-blue-100 ring-1 ring-blue-400" />
 
                 Foglalt
@@ -1134,7 +1124,8 @@ function StudioCalendar({ lessonType, initialRoom, roomRequest }: { lessonType: 
           {monthDays.map((date) => {
             const inMonth = date.getMonth() === selectedDate.getMonth();
             const isPastDay = dateKey(date) < dateKey(currentTime);
-            const inProgressCount = approvedSlots.filter(
+            // a látogató nem látja, mi vár jóváhagyásra: minden foglalás egyszerűen „foglalt”
+            const bookedCount = storedSlots.filter(
               (slot) => slot.room === activeRoom && slot.date === dateKey(date),
             ).length;
             const closed = !openingFor(config, activeRoom, dateKey(date));
@@ -1143,13 +1134,8 @@ function StudioCalendar({ lessonType, initialRoom, roomRequest }: { lessonType: 
               activeRoom,
               date,
               currentTime,
-              pendingSlots,
-              approvedSlots,
+              storedSlots,
             ) : 0;
-            const pendingCount = pendingSlots.filter(
-              (slot) =>
-                slot.room === activeRoom && slot.date === dateKey(date),
-            ).length;
 
             return (
               <button
@@ -1182,10 +1168,7 @@ function StudioCalendar({ lessonType, initialRoom, roomRequest }: { lessonType: 
                       {available > 0 && (
                         <span className="h-1.5 w-1.5 rounded-full bg-[#40CFD5]" />
                       )}
-                      {pendingCount > 0 && (
-                        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                      )}
-                      {inProgressCount > 0 && (
+                      {bookedCount > 0 && (
                         <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
                       )}
                     </span>

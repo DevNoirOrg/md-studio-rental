@@ -8,7 +8,7 @@ test("minden útvonal a /studio-berles alatt van, a kanonikus cím a hiphoptanci
   assert.equal(withBase("/api/studio-bookings"), "/studio-berles/api/studio-bookings");
   assert.equal(canonicalUrl(), "https://www.hiphoptanciskola.com/studio-berles");
   assert.equal(canonicalUrl("/adatkezeles"), "https://www.hiphoptanciskola.com/studio-berles/adatkezeles");
-  // a régi e-mailek linkjei is ezen az úton voltak: /studio-berles/dontes?…
-  assert.equal(DECISION_PATH, "/studio-berles/dontes");
-  assert.equal(new URL(DECISION_PATH, "https://www.hiphoptanciskola.com").href, "https://www.hiphoptanciskola.com/studio-berles/dontes");
+  // a régi /studio-berles/dontes?… linkek ide irányítanak át (next.config.ts)
+  assert.equal(DECISION_PATH, "/studio-berles/booking-review");
+  assert.equal(new URL(DECISION_PATH, "https://www.hiphoptanciskola.com").href, "https://www.hiphoptanciskola.com/studio-berles/booking-review");
 });

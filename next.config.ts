@@ -11,7 +11,11 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   basePath: "/studio-berles",
   async redirects() {
-    return [{ source: "/", destination: "/studio-berles", basePath: false, permanent: true }];
+    return [
+      { source: "/", destination: "/studio-berles", basePath: false, permanent: true },
+      // a döntési oldal régi címe (a korábban kiküldött e-mailek linkjei); a ?token=… paraméterek megmaradnak
+      { source: "/dontes", destination: "/booking-review", permanent: true },
+    ];
   },
   turbopack: {
     rules: {

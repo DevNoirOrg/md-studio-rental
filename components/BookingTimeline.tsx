@@ -156,7 +156,7 @@ export default function BookingTimeline<T extends StoredSlot>({
         <Block key={slot.id || `${slot.hour}-${slot.status}`} style={styleFor(slot)}
           type={clickable ? "button" : undefined}
           onClick={clickable ? (event: React.MouseEvent<HTMLElement>) => onBookingClick?.(slot, event.currentTarget) : undefined}
-          role={clickable ? undefined : "img"} aria-label={`${room}, ${date}, ${rangeLabel(slot)} – ${slot.status === "pending" ? "jóváhagyásra vár" : "foglalás alatt"}`}
+          role={clickable ? undefined : "img"} aria-label={`${room}, ${date}, ${rangeLabel(slot)} – ${slot.status === "pending" ? "jóváhagyásra vár" : slot.status === "approved" ? "foglalás alatt" : "foglalt"}`}
           className={`${clickable ? "cursor-pointer text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-black" : "pointer-events-none"} absolute inset-x-0 z-10 border px-2 py-1 text-xs font-bold ${
             slot.status === "pending" ? "border-amber-400 bg-amber-100 text-amber-900" : "border-blue-400 bg-blue-100 text-blue-900"
           }`}

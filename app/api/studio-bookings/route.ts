@@ -19,11 +19,12 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Érvénytelen naptári időszak." }, { status: 400 });
   }
   try {
-    // Ügyféladat és döntési token soha nem szerepel a publikus naptárválaszban.
+    // Ügyféladat, döntési token és állapot nem szerepel a publikus naptárválaszban: a látogató
+    // számára a jóváhagyásra váró és a jóváhagyott időpont egyaránt egyszerűen „foglalt”.
     const slots: Array<Record<string, unknown>> = [];
     // Lapozunk: a Supabase alapértelmezett sorlimitje nem rejthet el foglalásokat.
     for (let offset = 0; ; offset += 500) {
-      const page = await bookingStore<Array<{ duration_minutes: number } & Record<string, unknown>>>(`studio_slots?select=room,date,hour,status,duration_minutes&date=gte.${from}&date=lte.${to}&status=in.(pending,approved)&order=date,hour,room&limit=500&offset=${offset}`);
+      const page = await bookingStore<Array<{ duration_minutes: number } & Record<string, unknown>>>(`studio_slots?select=room,date,hour,duration_minutes&date=gte.${from}&date=lte.${to}&status=in.(pending,approved)&order=date,hour,room&limit=500&offset=${offset}`);
       slots.push(...page.map(({ duration_minutes, ...slot }) => ({
         ...slot, durationMinutes: duration_minutes,
       })));

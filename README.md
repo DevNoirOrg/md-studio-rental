@@ -6,7 +6,7 @@ Stack: Next.js 16 (App Router, Turbopack), React 19, TypeScript, Tailwind CSS 4,
 | Route | Purpose |
 | --- | --- |
 | `/` | Room cards, lesson type, calendar and booking request |
-| `/dontes` | Confirmation page behind the approve/reject links in notification emails |
+| `/booking-review` | Confirmation page behind the approve/reject links in notification emails; shows the request and the affected slot(s). The old `/dontes` path redirects here (query kept). |
 | `/admin` | Admin → **Foglalások**: booking calendar (create, reschedule, delete) |
 | `/admin/termek` | Admin → **Termek**: room texts, images, lesson types, prices per lesson type, weekly opening hours |
 | `/admin/adminok` | Admin → **Adminok**: who can sign in |
@@ -37,7 +37,7 @@ The app runs under the base path **`/studio-berles`** (`next.config.ts`) and is 
 
 Use `withBase()` for `fetch`, plain `<a>`, images and CSS `url()`; `next/link` and the router add the
 base path themselves. The admin is at `…/studio-berles/admin`; decision links are
-`${APP_BASE_URL}/studio-berles/dontes` (so links in emails sent before the move keep working).
+`${APP_BASE_URL}/studio-berles/booking-review` (so links in emails sent before the move keep working).
 On hiphoptanciskola.com the admin login shares the Supabase session cookie with the school admin
 (same Supabase project); each app still checks its own admin list.
 
@@ -47,9 +47,9 @@ On hiphoptanciskola.com the admin login shares the Supabase session cookie with 
   `rental` schema: rerun `supabase/studio-bookings.sql` once — it moves the existing `public` tables
   into `rental` without losing data — and add `rental` to Supabase → Project Settings → Data API →
   **Exposed schemas** (the app talks to PostgREST with `Accept-Profile: rental`).
-- Set `APP_BASE_URL` to this site's public URL, so new emails link to `/dontes` here.
+- Set `APP_BASE_URL` to this site's public URL, so new emails link to `/booking-review` here.
 - `NEXT_PUBLIC_SCHOOL_URL` is the "back to MD Dance School" link in the header/footer.
-- The school site redirects `/studio-berles` → this site and `/studio-berles/dontes?…` → `/dontes?…`
+- The school site redirects `/studio-berles` → this site and `/studio-berles/booking-review?…` → `/booking-review?…`
   (set `NEXT_PUBLIC_STUDIO_RENTAL_URL` there), so links in emails sent before the move keep working.
 - The rental admin is at `<this site>/admin`. (The school site's `/admin` is now the school's own content admin.)
 
@@ -91,7 +91,7 @@ The database prevents overlapping active requests, even when two users submit si
    - `SUPABASE_URL`: your project's URL.
    - `SUPABASE_SERVICE_ROLE_KEY`: the project's service-role key. Never use this key in client code or commit it.
    - `APP_BASE_URL`: `http://localhost:3000` locally; the public HTTPS URL of **this rental site** in production
-     (decision links point to `${APP_BASE_URL}/dontes`).
+     (decision links point to `${APP_BASE_URL}/studio-berles/booking-review`).
 4. Restart the preview. Set the same settings on the deployed server.
 
 Email links contain an unguessable decision token; only its SHA-256 hash is stored.
