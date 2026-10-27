@@ -168,7 +168,6 @@ export function buildEvent(slot: CalendarSlot, adminUrl?: string) {
     `Óratípus: ${lesson}`,
     `Időpont: ${start}–${formatBookingHour(end)} (${slot.durationMinutes} perc)`,
     `Ár: ${currency.format(slot.price)}`,
-    "Állapot: Foglalás alatt (jóváhagyva)",
     ...(adminUrl ? ["", `Megnyitás az adminban: ${adminUrl}`] : []),
     "",
     "Ezt az eseményt a foglalási rendszer kezeli — itt ne módosítsd, mert felülíródhat.",

@@ -30,9 +30,10 @@ test("event: title, booking details, Budapest local time, stable id", () => {
   assert.deepEqual(event.start, { dateTime: "2099-10-15T22:30:00", timeZone: "Europe/Budapest" });
   // 24:00-kor záródó idősáv → következő nap 00:00
   assert.deepEqual(event.end, { dateTime: "2099-10-16T00:00:00", timeZone: "Europe/Budapest" });
-  for (const part of ["+36301234567", "teszt@example.hu", "90 perc", "6000", "Foglalás alatt", "datum=2099-10-15"]) {
+  for (const part of ["+36301234567", "teszt@example.hu", "90 perc", "6000", "datum=2099-10-15"]) {
     assert.ok(event.description.replace(/\s/g, "").includes(part.replace(/\s/g, "")), part);
   }
+  assert.ok(!event.description.includes("Állapot"));
 });
 
 test("service account JWT is signed with RS256", () => {
