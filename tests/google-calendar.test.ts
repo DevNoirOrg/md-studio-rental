@@ -26,7 +26,9 @@ test("event: title, booking details, Budapest local time, stable id", () => {
   }, "https://x.hu/studio-berles/admin?datum=2099-10-15&terem=3");
   assert.equal(event.id, "0f1e2d3c4b5a49688776655443322110");
   assert.match(event.id, /^[0-9a-v]{5,1024}$/);
-  assert.equal(event.summary, "Privát óra – Teszt Elek");
+  // egy közös naptár: a cím elején a terem, a színe termenként más (Opera Közepes = zöld)
+  assert.equal(event.summary, "Opera Közepes · Privát óra – Teszt Elek");
+  assert.equal(event.colorId, "10");
   assert.deepEqual(event.start, { dateTime: "2099-10-15T22:30:00", timeZone: "Europe/Budapest" });
   // 24:00-kor záródó idősáv → következő nap 00:00
   assert.deepEqual(event.end, { dateTime: "2099-10-16T00:00:00", timeZone: "Europe/Budapest" });
@@ -86,7 +88,7 @@ test("sync writes approved slots, removes deleted ones and is safe to repeat", a
     SUPABASE_SERVICE_ROLE_KEY: "test-key",
     APP_BASE_URL: "https://www.example.hu",
     GOOGLE_SERVICE_ACCOUNT_JSON: JSON.stringify({ client_email: "robot@x.iam.gserviceaccount.com", private_key: privateKey.export({ type: "pkcs8", format: "pem" }) }),
-    GOOGLE_CALENDAR_OPERA_KOZEPES: "kozepes@group.calendar.google.com",
+    GOOGLE_CALENDAR_ID: "info.mddancestudio@gmail.com",
   };
   const original = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
   const originalFetch = globalThis.fetch;
@@ -155,8 +157,8 @@ test("sync writes approved slots, removes deleted ones and is safe to repeat", a
     assert.deepEqual(result, { configured: true, written: 2, removed: 0, failed: 0 });
     assert.equal(events.size, 2); // a jóváhagyásra váró igény nem került be
     const [first] = (await db.query<{ id: string }>("select id from studio_slots where date='2099-10-15' and hour=10")).rows;
-    assert.equal(events.get(eventIdFor(first.id))?.summary, "Kiscsoportos óra – Teszt Elek");
-    assert.ok(calls.every((call) => call.includes("/calendars/kozepes@group.calendar.google.com/events")));
+    assert.equal(events.get(eventIdFor(first.id))?.summary, "Opera Közepes · Kiscsoportos óra – Teszt Elek");
+    assert.ok(calls.every((call) => call.includes("/calendars/info.mddancestudio@gmail.com/events")));
 
     // ismételt szinkron: nincs teendő
     calls.length = 0;

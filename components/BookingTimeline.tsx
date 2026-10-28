@@ -40,12 +40,14 @@ interface BookingTimelineProps<T extends StoredSlot> {
   onRemove: (slot: Slot) => void;
   readOnly?: boolean;
   onBookingClick?: (slot: T, trigger: HTMLElement) => void;
+  /** A foglalás kártyáján az idősáv alatt megjelenő felirat (admin: foglaló neve + létszám). */
+  bookingLabel?: (slot: T) => string | null | undefined;
   removeOnClick?: boolean;
   reschedulingBooking?: StoredSlot | null;
 }
 
 export default function BookingTimeline<T extends StoredSlot>({
-  config, range, room, date, selectedSlots, storedSlots, availabilityReady, now, onSelect, onResize, onRemove, readOnly = false, onBookingClick, removeOnClick = false,
+  config, range, room, date, selectedSlots, storedSlots, availabilityReady, now, onSelect, onResize, onRemove, readOnly = false, onBookingClick, bookingLabel, removeOnClick = false,
   reschedulingBooking = null,
 }: BookingTimelineProps<T>) {
   const [preview, setPreview] = useState<Slot | null>(null);
@@ -152,16 +154,18 @@ export default function BookingTimeline<T extends StoredSlot>({
       {stored.map((slot) => {
         const clickable = !!onBookingClick && !reschedulingBooking;
         const Block = clickable ? "button" : "div";
+        const label = bookingLabel?.(slot);
         return (
         <Block key={slot.id || `${slot.hour}-${slot.status}`} style={styleFor(slot)}
           type={clickable ? "button" : undefined}
           onClick={clickable ? (event: React.MouseEvent<HTMLElement>) => onBookingClick?.(slot, event.currentTarget) : undefined}
-          role={clickable ? undefined : "img"} aria-label={`${room}, ${date}, ${rangeLabel(slot)} – ${slot.status === "pending" ? "jóváhagyásra vár" : slot.status === "approved" ? "foglalás alatt" : "foglalt"}`}
-          className={`${clickable ? "cursor-pointer text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-black" : "pointer-events-none"} absolute inset-x-0 z-10 border px-2 py-1 text-xs font-bold ${
+          role={clickable ? undefined : "img"} aria-label={`${room}, ${date}, ${rangeLabel(slot)}${label ? `, ${label}` : ""} – ${slot.status === "pending" ? "jóváhagyásra vár" : slot.status === "approved" ? "foglalás alatt" : "foglalt"}`}
+          className={`${clickable ? "cursor-pointer text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-black" : "pointer-events-none"} absolute inset-x-0 z-10 flex flex-col items-start justify-start overflow-hidden border px-2 py-1 text-xs font-bold ${
             slot.status === "pending" ? "border-amber-400 bg-amber-100 text-amber-900" : "border-blue-400 bg-blue-100 text-blue-900"
           }`}
         >
-          {rangeLabel(slot)}
+          <span className="block">{rangeLabel(slot)}</span>
+          {label && <span className="block w-full truncate font-semibold" title={label}>{label}</span>}
         </Block>
         );
       })}

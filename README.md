@@ -137,11 +137,11 @@ validation (public and admin API) always reads fresh settings.
 
 ## Google Calendar sync
 
-Approved bookings are written one-way into each room's existing Google Calendar (one event per
+Approved bookings are written one-way into the studio's Google Calendar (one event per
 slot; reschedule moves it, delete removes it; pending/rejected requests are not written; manual
 events in the calendars are not read). A service account writes the events; configuration is
-server-only env: `GOOGLE_SERVICE_ACCOUNT_JSON` and `GOOGLE_CALENDAR_ASTORIA_NAGY` /
-`_ASTORIA_KIS` / `_OPERA_NAGY` / `_OPERA_KOZEPES`. Without them the sync is disabled.
+server-only env: `GOOGLE_SERVICE_ACCOUNT_JSON` and `GOOGLE_CALENDAR_ID` (one shared calendar for all rooms;
+rooms are distinguished by event colour and a title prefix, see `ROOM_CALENDAR` in `lib/google-calendar.ts`). Without them the sync is disabled.
 
 Database triggers mark what needs syncing (`studio_slots.gcal_dirty`, `rental.gcal_deletions`); the
 event id is derived from the slot id, so syncing is idempotent. The sync runs after each approval

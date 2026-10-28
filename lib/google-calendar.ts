@@ -7,6 +7,8 @@ import { endHour, formatBookingHour, type Customer } from "./studio-booking.ts";
 /*
   Google Naptár szinkron — EGYIRÁNYÚ: a foglalási rendszer írja a termek Google Naptárait.
    - Csak a jóváhagyott („Foglalás alatt”) idősávok kerülnek be; minden idősáv külön esemény.
+   - Egy közös naptár (a stúdió fiókjában) az összes teremmel; a termeket az esemény színe
+     és a cím eleje különbözteti meg (ROOM_CALENDAR).
    - Átfoglaláskor az esemény átkerül, törléskor törlődik. A naptárban végzett kézi
      módosítás nem hat vissza (a következő szinkron felülírhatja).
    - Az esemény azonosítója az idősáv azonosítója (kötőjelek nélkül), így a szinkron
@@ -15,19 +17,22 @@ import { endHour, formatBookingHour, type Customer } from "./studio-booking.ts";
      (adatbázis-triggerek töltik, lásd supabase/studio-bookings.sql).
 
   Beállítás (Vercel környezeti változók, csak szerveren):
-    GOOGLE_SERVICE_ACCOUNT_JSON     — a Google szolgáltatásfiók kulcsa (a letöltött JSON teljes tartalma)
-    GOOGLE_CALENDAR_ASTORIA_NAGY    — a termek naptárainak azonosítói
-    GOOGLE_CALENDAR_ASTORIA_KIS       (Google Naptár → a naptár beállításai → „Naptár azonosítója”,
-    GOOGLE_CALENDAR_OPERA_NAGY         pl. abc123@group.calendar.google.com)
-    GOOGLE_CALENDAR_OPERA_KOZEPES
-  A naptárakat meg kell osztani a szolgáltatásfiók e-mail címével („Módosíthatja az eseményeket”).
+    GOOGLE_SERVICE_ACCOUNT_JSON — a Google szolgáltatásfiók kulcsa (a letöltött JSON teljes tartalma)
+    GOOGLE_CALENDAR_ID          — a közös naptár azonosítója (Google Naptár → a naptár beállításai →
+                                  „Naptár integrálása” → „Naptárazonosító”; a fő naptárnál maga a
+                                  Gmail-cím, pl. info.mddancestudio@gmail.com)
+  A naptárat meg kell osztani a szolgáltatásfiók e-mail címével („Módosíthatja az eseményeket”).
 */
 
-export const CALENDAR_ENV: Record<Room, string> = {
-  "Astoria - Nagy Terem": "GOOGLE_CALENDAR_ASTORIA_NAGY",
-  "Astoria - Kis Terem": "GOOGLE_CALENDAR_ASTORIA_KIS",
-  "Opera - Nagy Terem": "GOOGLE_CALENDAR_OPERA_NAGY",
-  "Opera - Közepes Terem": "GOOGLE_CALENDAR_OPERA_KOZEPES",
+/**
+ * Termenként: rövid név az esemény címéhez és a Google Naptár eseményszíne
+ * (colorId: 11 = Paradicsom/piros, 5 = Banán/sárga, 3 = Szőlő/lila, 10 = Bazsalikom/zöld).
+ */
+export const ROOM_CALENDAR: Record<Room, { short: string; colorId: string }> = {
+  "Astoria - Nagy Terem": { short: "Astoria Nagy", colorId: "11" },
+  "Astoria - Kis Terem": { short: "Astoria Kis", colorId: "5" },
+  "Opera - Nagy Terem": { short: "Opera Nagy", colorId: "3" },
+  "Opera - Közepes Terem": { short: "Opera Közepes", colorId: "10" },
 };
 
 const TIME_ZONE = "Europe/Budapest";
@@ -59,12 +64,12 @@ function serviceAccount(): ServiceAccount | null {
 
 /** Be van-e állítva a szinkron (szolgáltatásfiók + legalább egy terem naptára). */
 export function calendarConfigured(): boolean {
-  return !!serviceAccount() && ROOM_IDS.some((room) => !!calendarIdFor(room));
+  return !!serviceAccount() && !!calendarId();
 }
 
-export function calendarIdFor(room: string): string | null {
-  const key = (CALENDAR_ENV as Record<string, string>)[room];
-  return (key && process.env[key]?.trim()) || null;
+/** A közös naptár azonosítója (minden terem ebbe kerül). */
+export function calendarId(): string | null {
+  return process.env.GOOGLE_CALENDAR_ID?.trim() || null;
 }
 
 /** Az idősáv naptáreseményének azonosítója (a Google csak a-v és 0-9 karaktert enged; a hexa ilyen). */
@@ -161,6 +166,7 @@ export function buildEvent(slot: CalendarSlot, adminUrl?: string) {
   const endDate = end >= 24 ? new Date(Date.parse(`${slot.date}T00:00:00Z`) + 86400000).toISOString().slice(0, 10) : slot.date;
   const endTime = formatBookingHour(end >= 24 ? end - 24 : end);
   const lesson = lessonNames[slot.lessonType] ?? slot.lessonType;
+  const room = (ROOM_CALENDAR as Record<string, { short: string; colorId: string }>)[slot.room];
   const description = [
     `Név: ${slot.customer.name}`,
     `Telefon: ${slot.customer.phone}`,
@@ -175,7 +181,8 @@ export function buildEvent(slot: CalendarSlot, adminUrl?: string) {
   return {
     id: eventIdFor(slot.id),
     status: "confirmed",
-    summary: `${lesson} – ${slot.customer.name}`,
+    summary: `${room?.short ?? slot.room} · ${lesson} – ${slot.customer.name}`,
+    ...(room ? { colorId: room.colorId } : {}),
     description,
     start: { dateTime: `${slot.date}T${start}:00`, timeZone: TIME_ZONE },
     end: { dateTime: `${endDate}T${endTime}:00`, timeZone: TIME_ZONE },
@@ -238,6 +245,7 @@ async function runSync(): Promise<SyncResult> {
     result.error ??= errorText(err);
   };
   const token = await accessToken(account);
+  const calId = calendarId()!;
 
   // 1) törölt idősávok eseményei
   const deletions = await bookingStore<Array<{ slot_id: string; room: string }>>(
@@ -245,9 +253,7 @@ async function runSync(): Promise<SyncResult> {
   );
   for (const row of deletions) {
     try {
-      const calendarId = calendarIdFor(row.room);
-      if (!calendarId) throw new Error(`Nincs beállítva naptár ehhez a teremhez: ${row.room} (${CALENDAR_ENV[row.room as Room] ?? "?"}).`);
-      await deleteEvent(token, calendarId, row.slot_id);
+      await deleteEvent(token, calId, row.slot_id);
       await bookingStore(`gcal_deletions?slot_id=eq.${row.slot_id}`, { method: "DELETE" });
       result.removed++;
     } catch (err) {
@@ -266,18 +272,16 @@ async function runSync(): Promise<SyncResult> {
       duration_minutes: `eq.${row.duration_minutes}`, status: `eq.${row.status}`,
     });
     try {
-      const calendarId = calendarIdFor(row.room);
-      if (!calendarId) throw new Error(`Nincs beállítva naptár ehhez a teremhez: ${row.room} (${CALENDAR_ENV[row.room as Room] ?? "?"}).`);
       const approved = row.status === "approved" && !!row.studio_requests;
       if (approved) {
         const slot: CalendarSlot = {
           id: row.id, room: row.room, date: row.date, hour: Number(row.hour), durationMinutes: row.duration_minutes,
           price: row.price, lessonType: row.studio_requests!.lesson_type, customer: row.studio_requests!.customer,
         };
-        await upsertEvent(token, calendarId, buildEvent(slot, adminUrlFor(slot)));
+        await upsertEvent(token, calId, buildEvent(slot, adminUrlFor(slot)));
         result.written++;
       } else {
-        await deleteEvent(token, calendarId, row.id);
+        await deleteEvent(token, calId, row.id);
         result.removed++;
       }
       await bookingStore(`studio_slots?${unchanged}`, {

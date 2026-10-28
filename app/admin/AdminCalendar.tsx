@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import BookingTimeline, { timelineRange } from "@/components/BookingTimeline";
 import {
-  rooms, isRoom, overlaps, endHour, formatBookingHour, canRescheduleBooking,
+  rooms, lessonTypeIds, isRoom, overlaps, endHour, formatBookingHour, canRescheduleBooking,
   type AdminSlot, type LessonType, type Room, type Slot,
 } from "@/lib/studio-booking";
 import BookingDetails from "./BookingDetails";
@@ -13,6 +13,9 @@ import { withBase } from "@/lib/base-path";
 import { openingFor, roomAllows, roomLabel, type RoomsConfig } from "@/lib/room-config";
 
 type CalendarView = "day" | "week" | "month";
+
+/** Rövid létszám-jelölés az időpontkártyán (kevesebb helyet foglal, mint az óratípus neve). */
+const headcountLabel: Record<LessonType, string> = { privat: "1–3", kiscsoportos: "4+", csoportos: "18+" };
 
 function dateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -50,8 +53,9 @@ export default function AdminCalendar({ config, initialDate, initialRoom }: {
   const [rescheduleSaving, setRescheduleSaving] = useState(false);
   const rescheduleBusy = useRef(false);
   const rescheduleNotice = useRef<HTMLDivElement>(null);
-  // Új foglalásnál csak azok a termek, ahol a választott óratípus engedélyezett (Termek menü).
-  const allowedRooms: readonly string[] = rescheduling ? [rescheduling.room] : rooms.filter((r) => roomAllows(config, r, lessonType));
+  // A terem-fülek mindig választhatók (csak átfoglalás közben zárolt a terem). Az óratípust
+  // a kijelölt termekhez igazítjuk (lásd selectSlot), az űrlap pedig csak az ott engedélyezettet kínálja.
+  const allowedRooms: readonly string[] = rescheduling ? [rescheduling.room] : rooms;
   const validSlot = (slot: Slot) => {
     const opening = openingFor(config, slot.room, slot.date);
     return !!opening && slot.hour >= opening.open && endHour(slot) <= opening.close &&
@@ -71,7 +75,14 @@ export default function AdminCalendar({ config, initialDate, initialRoom }: {
     if (!ready || !validSlot(slot)) return;
     setSaved(false);
     setSelectedId(null);
-    setSelectedSlots((current) => current.some((other) => overlaps(slot, other)) ? current : [...current, slot]);
+    if (selectedSlots.some((other) => overlaps(slot, other))) return;
+    const next = [...selectedSlots, slot];
+    setSelectedSlots(next);
+    // ha a választott óratípus az új teremben nem foglalható, az első mindenhol engedélyezettre váltunk
+    if (!next.every((s) => roomAllows(config, s.room, lessonType))) {
+      const fit = lessonTypeIds.find((type) => next.every((s) => roomAllows(config, s.room, type)));
+      if (fit) setLessonType(fit);
+    }
   };
   const resizeSlot = (original: Slot, next: Slot) => {
     if (!ready || !validSlot(next)) return;
@@ -300,6 +311,7 @@ export default function AdminCalendar({ config, initialDate, initialRoom }: {
                   storedSlots={ready ? slots : []}
                   availabilityReady={ready} now={now}
                   onSelect={selectSlot} onResize={resizeSlot} onRemove={removeSlot} removeOnClick
+                  bookingLabel={(slot) => `${slot.customer.name} · ${headcountLabel[slot.lessonType] ?? ""}`}
                   onBookingClick={(slot, trigger) => {
                     bookingTrigger.current = trigger;
                     setDeleted(false);
