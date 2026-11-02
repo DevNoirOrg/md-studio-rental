@@ -13,7 +13,7 @@
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.118.0",
-    "lucide-react": "^1.61.0",
+    "lucide-react": "^1.65.0",
     "motion": "^12.43.0",
     "next": "16.4.3",
     "react": "19.3.1",
@@ -22,7 +22,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.3.16",
+    "@electric-sql/pglite": "^0.5.13",
     "@tailwindcss/turbopack": "^4.3.3",
     "@types/node": "^22",
     "@types/react": "^19",
