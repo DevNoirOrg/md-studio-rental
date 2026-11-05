@@ -171,6 +171,7 @@ export function buildEvent(slot: CalendarSlot, adminUrl?: string) {
     `Név: ${slot.customer.name}`,
     `Telefon: ${slot.customer.phone}`,
     `E-mail: ${slot.customer.email}`,
+    ...(slot.customer.language === "en" ? ["Nyelv: angol (angolul válaszolj)"] : []),
     `Óratípus: ${lesson}`,
     `Időpont: ${start}–${formatBookingHour(end)} (${slot.durationMinutes} perc)`,
     `Ár: ${currency.format(slot.price)}`,
@@ -181,7 +182,7 @@ export function buildEvent(slot: CalendarSlot, adminUrl?: string) {
   return {
     id: eventIdFor(slot.id),
     status: "confirmed",
-    summary: `${room?.short ?? slot.room} · ${lesson} – ${slot.customer.name}`,
+    summary: `${room?.short ?? slot.room} · ${lesson} – ${slot.customer.name}${slot.customer.language === "en" ? " (EN)" : ""}`,
     ...(room ? { colorId: room.colorId } : {}),
     description,
     start: { dateTime: `${slot.date}T${start}:00`, timeZone: TIME_ZONE },

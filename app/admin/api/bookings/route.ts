@@ -19,7 +19,7 @@ interface AdminSlotRow {
   gcal_dirty?: boolean;
   gcal_synced_at?: string | null;
   gcal_error?: string | null;
-  studio_requests: { customer: { name: string; email: string; phone: string }; lesson_type: string };
+  studio_requests: { customer: { name: string; email: string; phone: string; language?: string }; lesson_type: string };
 }
 
 export async function PATCH(request: NextRequest) {
@@ -170,6 +170,7 @@ export async function GET(request: NextRequest) {
           name: studio_requests.customer.name,
           email: studio_requests.customer.email,
           phone: studio_requests.customer.phone,
+          ...(studio_requests.customer.language === "en" ? { language: "en" as const } : {}),
         },
         lessonType: studio_requests.lesson_type,
       })));

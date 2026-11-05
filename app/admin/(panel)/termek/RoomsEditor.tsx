@@ -7,7 +7,10 @@ import {
   Button, Card, Field, PageHeader, SaveBar, StringListEditor, inputCls, isSame, textareaCls, useSaver,
 } from "@/components/admin/ui";
 import type { EditInfo } from "@/lib/admin-types";
-import { LESSON_TYPES, WEEKDAY_NAMES, type LessonType, type Room, type RoomConfig } from "@/lib/room-config";
+import {
+  LESSON_TYPES, WEEKDAY_NAMES, missingTranslationCount,
+  type LessonType, type Room, type RoomConfig, type RoomTextField, type RoomTranslation,
+} from "@/lib/room-config";
 import { formatBookingHour } from "@/lib/studio-booking";
 
 export interface RoomEntry {
@@ -202,8 +205,65 @@ function RoomForm({ id, room, onChange }: { id: Room; room: RoomConfig; onChange
   );
 }
 
+/* ── Angol szövegek: csak a fordítható mezők; a magyar szöveg látszik helyőrzőként és alatta ── */
+const translatedFields: Array<{ field: RoomTextField; label: string; long?: boolean }> = [
+  { field: "location", label: "Helyszín" },
+  { field: "name", label: "Terem neve" },
+  { field: "description", label: "Leírás", long: true },
+  { field: "sound", label: "Hangrendszer" },
+  { field: "mirror", label: "Tükör" },
+  { field: "floor", label: "Padló" },
+  { field: "light", label: "Világítás" },
+];
+
+function TranslationForm({ id, room, onChange }: { id: Room; room: RoomConfig; onChange: (update: (r: RoomConfig) => RoomConfig) => void }) {
+  const en = room.en ?? {};
+  const f = (name: string) => `${id}-en-${name}`.replace(/\s+/g, "-");
+  const setEn = (patch: Partial<RoomTranslation>) => onChange((r) => ({ ...r, en: { ...r.en, ...patch } }));
+  const setExtra = (i: number, value: string) =>
+    onChange((r) => ({ ...r, en: { ...r.en, extras: r.extras.map((_, j) => (j === i ? value : r.en?.extras?.[j] ?? "")) } }));
+
+  return (
+    <div className="space-y-6">
+      <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+        Az angol oldalon (/studio-berles/en) ezek a szövegek látszanak. Ami üresen marad, az ott is magyarul jelenik meg.
+        A képek, méretek, árak és a nyitvatartás közösek — azokat a Magyar fülön állíthatod.
+      </p>
+      <Card title="Megjelenés (angol)">
+        <div className="grid gap-5 md:grid-cols-2">
+          {translatedFields.map(({ field, label, long }) => (
+            <Field key={field} label={label} htmlFor={f(field)} hint={room[field] ? `Magyarul: ${room[field]}` : undefined}
+              className={long ? "md:col-span-2" : undefined}>
+              {long ? (
+                <textarea id={f(field)} rows={4} className={textareaCls} value={en[field] ?? ""} placeholder={room[field]}
+                  onChange={(e) => setEn({ [field]: e.target.value })} />
+              ) : (
+                <input id={f(field)} className={inputCls} value={en[field] ?? ""} placeholder={room[field]}
+                  onChange={(e) => setEn({ [field]: e.target.value })} />
+              )}
+            </Field>
+          ))}
+        </div>
+      </Card>
+      {room.extras.length > 0 && (
+        <Card title="Extrák (angol)" description="Ugyanazok a címkék, mint a Magyar fülön, ugyanabban a sorrendben.">
+          <div className="grid gap-4 md:grid-cols-2">
+            {room.extras.map((extra, i) => (
+              <Field key={i} label={extra} htmlFor={f(`extra-${i}`)}>
+                <input id={f(`extra-${i}`)} className={inputCls} value={en.extras?.[i] ?? ""} placeholder={extra}
+                  onChange={(e) => setExtra(i, e.target.value)} />
+              </Field>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 export default function RoomsEditor({ rooms }: { rooms: RoomEntry[] }) {
   const [activeId, setActiveId] = useState<Room>(rooms[0].id);
+  const [lang, setLang] = useState<"hu" | "en">("hu");
   const [drafts, setDrafts] = useState<Record<string, RoomConfig>>(() => Object.fromEntries(rooms.map((r) => [r.id, r.config])));
   const { pending, status, save, setStatus } = useSaver();
   const active = rooms.find((r) => r.id === activeId) ?? rooms[0];
@@ -255,12 +315,41 @@ export default function RoomsEditor({ rooms }: { rooms: RoomEntry[] }) {
         Belső azonosító (nem módosítható): <span className="font-bold text-slate-500">{active.id}</span>
       </p>
 
-      <RoomForm
-        key={active.id}
-        id={active.id}
-        room={draft}
-        onChange={(update) => setDrafts((d) => ({ ...d, [active.id]: update(d[active.id]) }))}
-      />
+      <div className="mb-5 flex items-center gap-1 border-b border-slate-200" role="tablist" aria-label="Szerkesztési nyelv">
+        {(["hu", "en"] as const).map((code) => {
+          const missing = code === "en" ? missingTranslationCount(draft) : 0;
+          return (
+            <button key={code} type="button" role="tab" aria-selected={lang === code} onClick={() => setLang(code)}
+              className={`border-b-2 px-4 py-3 text-sm font-extrabold transition-colors ${
+                lang === code ? "border-md-teal text-ink" : "border-transparent text-slate-400 hover:text-ink"
+              }`}>
+              {code === "hu" ? "Magyar" : "English"}
+              {code === "en" && (
+                <span title={missing ? `${missing} szöveg még nincs lefordítva` : "Minden le van fordítva"}
+                  className={`ml-1.5 rounded-full px-2 py-0.5 text-[10px] ${missing ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>
+                  {missing}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {lang === "hu" ? (
+        <RoomForm
+          key={active.id}
+          id={active.id}
+          room={draft}
+          onChange={(update) => setDrafts((d) => ({ ...d, [active.id]: update(d[active.id]) }))}
+        />
+      ) : (
+        <TranslationForm
+          key={`${active.id}-en`}
+          id={active.id}
+          room={draft}
+          onChange={(update) => setDrafts((d) => ({ ...d, [active.id]: update(d[active.id]) }))}
+        />
+      )}
 
       <SaveBar
         dirty={isDirty(active)}

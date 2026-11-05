@@ -1,15 +1,13 @@
 import { Fragment } from 'react'
-import type { Metadata } from 'next'
-import { canonicalUrl } from '@/lib/base-path'
 import SiteHeader from '@/components/SiteHeader'
 import SiteFooter from '@/components/SiteFooter'
 import { parsePrivacyText, privacyText, type PrivacyBlock } from '@/lib/privacy'
+import { t, type Locale } from '@/lib/i18n'
 
-export const metadata: Metadata = {
-  title: 'Adatkezelési tájékoztató – MD Dance School',
-  description: 'Az MD Dance School (Master Dance Tánciskola) adatkezelési tájékoztatója.',
-  alternates: { canonical: canonicalUrl('/adatkezeles') },
-}
+/*
+  Az adatkezelési tájékoztató oldal (magyarul: /adatkezeles, angolul: /en/privacy).
+  A tájékoztató szövege csak magyarul van meg — az angol oldal ezt egy megjegyzéssel jelzi.
+*/
 
 function Blocks({ blocks }: { blocks: PrivacyBlock[] }) {
   return blocks.map((b, i) =>
@@ -32,16 +30,20 @@ function Blocks({ blocks }: { blocks: PrivacyBlock[] }) {
   )
 }
 
-export default function AdatkezelesPage() {
+export default function PrivacyPage({ locale }: { locale: Locale }) {
   const { intro, sections } = parsePrivacyText(privacyText)
+  const d = t(locale)
 
   return (
     <main className="bg-white">
-      <SiteHeader />
+      <SiteHeader locale={locale} />
       <section className="px-5 pb-24 pt-36 sm:pt-40">
         <div className="mx-auto max-w-4xl">
           <p className="text-xs font-bold uppercase tracking-[0.3em] text-[#179da3]">MD Dance School</p>
-          <h1 className="section-title mt-3 text-5xl text-black sm:text-6xl">Adatkezelési tájékoztató</h1>
+          <h1 className="section-title mt-3 text-5xl text-black sm:text-6xl">{d.privacy}</h1>
+          {d.privacyOnly && (
+            <p lang="en" className="mt-6 rounded-2xl bg-[#40CFD5]/15 px-5 py-4 text-sm font-semibold text-[#087c81]">{d.privacyOnly}</p>
+          )}
 
           {intro.length > 0 && (
             <div className="mt-8 space-y-2 rounded-[1.75rem] border-2 border-yellow-200 bg-yellow-50 px-6 py-5 text-sm font-semibold text-yellow-900">
@@ -61,7 +63,7 @@ export default function AdatkezelesPage() {
 
           {/* Tartalomjegyzék */}
           <nav className="mt-10 rounded-[2rem] bg-gray-50 p-6 ring-1 ring-black/5 md:p-8">
-            <p className="mb-4 text-[11px] font-extrabold uppercase tracking-widest text-gray-400">Tartalom</p>
+            <p className="mb-4 text-[11px] font-extrabold uppercase tracking-widest text-gray-400">{d.contents}</p>
             <ol className="grid list-decimal gap-x-8 gap-y-2 pl-5 text-sm font-semibold text-gray-600 marker:text-[#179da3] sm:grid-cols-2">
               {sections.map((s) => (
                 <li key={s.id}>
@@ -73,7 +75,7 @@ export default function AdatkezelesPage() {
             </ol>
           </nav>
 
-          <article className="mt-12 text-[15px] leading-relaxed text-gray-700">
+          <article lang="hu" className="mt-12 text-[15px] leading-relaxed text-gray-700">
             {sections.map((s, i) => (
               <section key={s.id} className="mt-10 first:mt-0">
                 <h2 id={s.id} className="scroll-mt-32 text-2xl font-extrabold text-black">
@@ -85,7 +87,7 @@ export default function AdatkezelesPage() {
           </article>
         </div>
       </section>
-      <SiteFooter />
+      <SiteFooter locale={locale} />
     </main>
   )
 }

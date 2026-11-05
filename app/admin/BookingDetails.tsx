@@ -135,6 +135,9 @@ export default function BookingDetails({ booking, onClose, onDeleted, onStartRes
       <h3 className="mt-8 border-t border-gray-200 pt-6 text-lg font-extrabold">Ügyfél adatai</h3>
       <dl className="mt-5 space-y-5 break-words text-sm">
         <div><dt className="text-gray-500">Név</dt><dd className="mt-1 font-bold">{customer.name}</dd></div>
+        {customer.language === "en" && (
+          <div><dt className="text-gray-500">Nyelv</dt><dd className="mt-1 font-bold text-amber-700">Angol — az angol oldalról foglalt, angolul válaszolj</dd></div>
+        )}
         <div><dt className="text-gray-500">Telefonszám</dt><dd className="mt-1">
           <a href={`tel:${customer.phone.replace(/[\s()-]/g, "")}`} className="font-bold text-[#087c81] underline">{customer.phone}</a>
         </dd></div>

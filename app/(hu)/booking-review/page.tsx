@@ -22,7 +22,7 @@ interface RequestSlot {
 }
 interface RequestDetails {
   lessonType: LessonType;
-  customer: { name: string; email: string; phone: string };
+  customer: { name: string; email: string; phone: string; language?: string };
   slots: RequestSlot[];
 }
 
@@ -178,6 +178,9 @@ function BookingDecision() {
               <div><dt className="text-gray-500">Óratípus</dt><dd className="font-bold">{lessonNames[details.lessonType] ?? details.lessonType}</dd></div>
               <div><dt className="text-gray-500">Telefon</dt><dd className="font-bold">{details.customer.phone}</dd></div>
               <div className="min-w-0"><dt className="text-gray-500">E-mail</dt><dd className="truncate font-bold">{details.customer.email}</dd></div>
+              {details.customer.language === "en" && (
+                <div className="sm:col-span-2"><dt className="text-gray-500">Nyelv</dt><dd className="font-bold text-amber-700">Angol — angolul válaszolj</dd></div>
+              )}
             </dl>
 
             <h2 className="mt-6 text-sm font-extrabold uppercase tracking-widest text-[#087c81]">

@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 
 interface RequestRow {
   lesson_type: string;
-  customer: { name?: string; email?: string; phone?: string };
+  customer: { name?: string; email?: string; phone?: string; language?: string };
   studio_slots: Array<{ id: string; room: string; date: string; hour: number; duration_minutes: number; price: number; status: string }>;
 }
 
@@ -44,7 +44,10 @@ export async function GET(request: Request) {
       }));
     return NextResponse.json({
       lessonType: row.lesson_type,
-      customer: { name: row.customer?.name ?? "", email: row.customer?.email ?? "", phone: row.customer?.phone ?? "" },
+      customer: {
+        name: row.customer?.name ?? "", email: row.customer?.email ?? "", phone: row.customer?.phone ?? "",
+        ...(row.customer?.language === "en" ? { language: "en" } : {}),
+      },
       slots,
     }, { headers });
   } catch (caught) {

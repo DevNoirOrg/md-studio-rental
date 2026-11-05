@@ -311,7 +311,7 @@ export default function AdminCalendar({ config, initialDate, initialRoom }: {
                   storedSlots={ready ? slots : []}
                   availabilityReady={ready} now={now}
                   onSelect={selectSlot} onResize={resizeSlot} onRemove={removeSlot} removeOnClick
-                  bookingLabel={(slot) => `${slot.customer.name} · ${headcountLabel[slot.lessonType] ?? ""}`}
+                  bookingLabel={(slot) => `${slot.customer.name}${slot.customer.language === "en" ? " (EN)" : ""} · ${headcountLabel[slot.lessonType] ?? ""}`}
                   onBookingClick={(slot, trigger) => {
                     bookingTrigger.current = trigger;
                     setDeleted(false);

@@ -53,10 +53,14 @@ export function buildBookingEmail(
     const time = `${formatBookingHour(slot.hour)}–${formatBookingHour(endHour(slot))}`;
     return { ...slot, date, time, price: currency.format(slot.price) };
   });
+  // Az angol oldalról érkezett foglalásnál jelezzük, hogy angolul kell válaszolni.
+  const english = customer.language === "en";
+  const languageNote = "Nyelv: angol – a foglaló az angol oldalról foglalt, angolul válaszolj neki.";
   return {
-    subject: `Új stúdiófoglalási igény – ${slots.length} időpont`,
+    subject: `${english ? "[EN] " : ""}Új stúdiófoglalási igény – ${slots.length} időpont`,
     text: [
       "Új stúdiófoglalási igény – jóváhagyásra vár",
+      ...(english ? [languageNote] : []),
       `Óratípus: ${lessonLabel}`,
       `Név: ${customer.name}`, `E-mail: ${customer.email}`, `Telefon: ${customer.phone}`,
       ...lines.map((slot, index) => `\n${index + 1}. ${slot.room}\nDátum: ${slot.date}\nIdősáv: ${slot.time}\nÁr: ${slot.price}\nJóváhagyás: ${actionUrl("approve", slot.id)}\nElutasítás: ${actionUrl("reject", slot.id)}`),
@@ -69,6 +73,7 @@ export function buildBookingEmail(
       <div style="max-width:680px;margin:24px auto;padding:24px;background:white;border-radius:16px">
         <h1 style="border-bottom:4px solid #40CFD5;padding-bottom:16px">Új stúdiófoglalási igény</h1>
         <p>Jóváhagyásra vár. A foglalás csak e-mailes vagy telefonos megerősítés után végleges.</p>
+        ${english ? `<p style="padding:12px 16px;border-radius:12px;background:#fef3c7;color:#78350f;font-weight:bold">${escapeHtml(languageNote)}</p>` : ""}
         <h2>Ügyfél adatai</h2>
         <p><strong>Óratípus:</strong> ${escapeHtml(lessonLabel)}</p>
         <p><strong>Név:</strong> ${escapeHtml(customer.name)}<br>

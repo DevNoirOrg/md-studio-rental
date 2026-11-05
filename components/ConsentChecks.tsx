@@ -1,6 +1,8 @@
 'use client'
 import type React from 'react'
-import { PRIVACY_URL } from '@/lib/privacy'
+import { withBase } from '@/lib/base-path'
+import { privacyPath } from '@/lib/i18n'
+import { useLocale } from './LocaleContext'
 
 /*
   A két kötelező adatkezelési jelölőnégyzet — minden űrlapon ugyanaz
@@ -18,16 +20,6 @@ export type Consents = Record<ConsentKey, boolean>
 
 export const emptyConsents: Consents = { tajekoztato: false, adatkezeles: false }
 
-export const CONSENT_ERRORS: Record<ConsentKey, string> = {
-  tajekoztato: 'Az elküldéshez el kell fogadnod az Adatkezelési tájékoztatót.',
-  adatkezeles: 'Az elküldéshez hozzá kell járulnod az adataid kezeléséhez.',
-}
-
-export function consentErrors(values: Partial<Consents>) {
-  const e: Partial<Record<ConsentKey, string>> = {}
-  for (const k of Object.keys(CONSENT_ERRORS) as ConsentKey[]) if (!values[k]) e[k] = CONSENT_ERRORS[k]
-  return e
-}
 
 interface ConsentChecksProps {
   values: Partial<Consents>
@@ -38,26 +30,28 @@ interface ConsentChecksProps {
 }
 
 export default function ConsentChecks({ values, onChange, showErrors = false, idPrefix = 'consent', className = '' }: ConsentChecksProps) {
+  const { locale, d } = useLocale()
+  const errors: Record<ConsentKey, string> = { tajekoztato: d.consent.errorPrivacy, adatkezeles: d.consent.errorData }
   const items: Array<{ key: ConsentKey; label: React.ReactNode }> = [
     {
       key: 'tajekoztato',
       label: (
         <>
-          Elolvastam és elfogadom az{' '}
+          {d.consent.privacyRead}{' '}
           <a
-            href={PRIVACY_URL}
+            href={withBase(privacyPath(locale))}
             target="_blank"
             rel="noopener noreferrer"
             className="underline underline-offset-2 hover:text-[#179da3]"
             onClick={(e) => e.stopPropagation()}
           >
-            Adatkezelési tájékoztatóban
-          </a>{' '}
-          foglaltakat.
+            {d.consent.privacyLink}
+          </a>
+          {locale === 'en' ? d.consent.privacyEnd : ` ${d.consent.privacyEnd}`}
         </>
       ),
     },
-    { key: 'adatkezeles', label: 'Hozzájárulok a fenti adataim Adatkezelő által történő kezeléséhez.' },
+    { key: 'adatkezeles', label: d.consent.data },
   ]
 
   return (
@@ -92,7 +86,7 @@ export default function ConsentChecks({ values, onChange, showErrors = false, id
                 {label} <span className="text-[#1a9ea3]">*</span>
               </span>
             </label>
-            {error && <p className="ml-9 mt-1.5 text-[13px] font-semibold text-red-600">{CONSENT_ERRORS[key]}</p>}
+            {error && <p className="ml-9 mt-1.5 text-[13px] font-semibold text-red-600">{errors[key]}</p>}
           </div>
         )
       })}

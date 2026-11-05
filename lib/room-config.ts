@@ -50,7 +50,17 @@ export interface RoomConfig {
   prices: Record<LessonType, number>;
   /** Heti nyitvatartás: 0 = hétfő … 6 = vasárnap. */
   hours: DayHours[];
+  /** Angol szövegek (adminban, az „English” fülön). Ami üres, az angol oldalon magyarul jelenik meg. */
+  en?: RoomTranslation;
 }
+
+/** A terem fordítható szöveges mezői (a számok, képek, árak, nyitvatartás közösek). */
+export const ROOM_TEXT_FIELDS = ["location", "name", "description", "sound", "mirror", "floor", "light"] as const;
+export type RoomTextField = (typeof ROOM_TEXT_FIELDS)[number];
+export type RoomTranslation = Partial<Record<RoomTextField, string>> & {
+  /** Az extrák angolul, a magyar lista sorrendjében (üres elem = magyarul marad). */
+  extras?: string[];
+};
 
 export type RoomsConfig = Record<Room, RoomConfig>;
 
@@ -185,6 +195,7 @@ export function normalizeRoomConfig(id: Room, raw: unknown): RoomConfig {
     prices: Object.fromEntries(
       LESSON_TYPES.map((t) => [t, typeof prices[t] === "number" && (prices[t] as number) > 0 ? Math.round(prices[t] as number) : d.prices[t]]),
     ) as Record<LessonType, number>,
+    ...normalizeTranslation(r.en),
     hours: hours.map((h: unknown, i: number) => {
       const day = isObj(h) ? { closed: h.closed === true, open: h.open as number, close: h.close as number } : null;
       if (!day || !isValidDay(day)) return d.hours[i];
@@ -194,6 +205,42 @@ export function normalizeRoomConfig(id: Room, raw: unknown): RoomConfig {
       return { closed: true, open: keep ? day.open : d.hours[i].open, close: keep ? day.close : d.hours[i].close };
     }),
   };
+}
+
+/** Az angol szövegek tisztítása; ha nincs bennük semmi, a mező kimarad (így a régi adat változatlan). */
+function normalizeTranslation(raw: unknown): { en?: RoomTranslation } {
+  if (!isObj(raw)) return {};
+  const en: RoomTranslation = {};
+  for (const field of ROOM_TEXT_FIELDS) {
+    if (typeof raw[field] === "string" && raw[field]) en[field] = raw[field] as string;
+  }
+  if (Array.isArray(raw.extras)) {
+    const extras = raw.extras.map((x) => (typeof x === "string" ? x : ""));
+    while (extras.length && !extras[extras.length - 1].trim()) extras.pop();
+    if (extras.length) en.extras = extras;
+  }
+  return Object.keys(en).length ? { en } : {};
+}
+
+/** Az angol oldalhoz: a kitöltött angol szövegek a magyar helyére kerülnek, a többi magyarul marad. */
+export function localizeRoomConfig(c: RoomConfig, locale: "hu" | "en"): RoomConfig {
+  if (locale !== "en" || !c.en) return c;
+  const en = c.en;
+  const out: RoomConfig = { ...c, extras: c.extras.map((x, i) => en.extras?.[i]?.trim() || x) };
+  for (const field of ROOM_TEXT_FIELDS) out[field] = en[field]?.trim() || c[field];
+  return out;
+}
+
+export function localizeRoomsConfig(config: RoomsConfig, locale: "hu" | "en"): RoomsConfig {
+  if (locale !== "en") return config;
+  return Object.fromEntries(ROOM_IDS.map((id) => [id, localizeRoomConfig(config[id], locale)])) as RoomsConfig;
+}
+
+/** Hány magyarul kitöltött szöveg nincs még lefordítva (az admin „English” fülének jelvényéhez). */
+export function missingTranslationCount(c: RoomConfig): number {
+  const fields = ROOM_TEXT_FIELDS.filter((field) => c[field].trim() && !c.en?.[field]?.trim()).length;
+  const extras = c.extras.filter((x, i) => x.trim() && !c.en?.extras?.[i]?.trim()).length;
+  return fields + extras;
 }
 
 /** Az adatbázis soraiból (id + data) a teljes beállítás; a hiányzó termek az alapértéket kapják. */

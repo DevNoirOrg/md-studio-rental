@@ -12,6 +12,8 @@ import {
   type LessonType, type RoomConfig,
 } from "@/lib/room-config";
 import { ROOMS_TAG } from "@/lib/rooms-store";
+import { PAGE_CONTENT_KEY } from "@/lib/page-content";
+import { PAGE_CONTENT_TAG } from "@/lib/page-content-store";
 import { endHour, formatBookingHour } from "@/lib/studio-booking";
 import { syncCalendar } from "@/lib/google-calendar";
 
@@ -74,6 +76,17 @@ const roomSchema = z.object({
     csoportos: price(`${lessonNames.csoportos} óradíja`),
   }),
   hours: z.array(z.object({ closed: z.boolean(), open: halfHour, close: halfHour })).length(7),
+  // angol szövegek (üres = az angol oldalon magyarul jelenik meg)
+  en: z.object({
+    location: text(80, "Helyszín (angol)"),
+    name: text(80, "Terem neve (angol)"),
+    description: text(2000, "Leírás (angol)"),
+    sound: text(300, "Hangrendszer (angol)"),
+    mirror: text(300, "Tükör (angol)"),
+    floor: text(300, "Padló (angol)"),
+    light: text(300, "Világítás (angol)"),
+    extras: z.array(text(80, "Extra (angol)")).max(20),
+  }).partial().optional(),
 }).superRefine((room, ctx) => {
   room.hours.forEach((day, i) => {
     if (!isValidDay(day)) {
@@ -144,6 +157,46 @@ export async function saveRoom(idInput: string, input: unknown): Promise<ActionR
     } catch (err) {
       console.error("[admin] room conflict check failed", err);
     }
+  });
+}
+
+// ---------------------------------------------------------------------
+//  Szövegek (a foglalóoldal óratípus-kártyái és tájékoztatója, magyarul és angolul)
+// ---------------------------------------------------------------------
+const lessonTextSchema = z.object({
+  title: text(80, "Óratípus neve"),
+  capacity: text(40, "Létszám"),
+  description: text(300, "Óratípus leírása"),
+});
+const paragraphs = (label: string) => z.array(text(2000, label)).max(20);
+const pageContentSchema = z.object({
+  lessonTitle: text(200, "1. lépés címe"),
+  lessonLead: text(300, "1. lépés alcíme"),
+  lessons: z.object({ privat: lessonTextSchema, kiscsoportos: lessonTextSchema, csoportos: lessonTextSchema }),
+  intro: paragraphs("Bevezető bekezdés"),
+  approvalTitle: text(200, "Jóváhagyás címe"),
+  approval: paragraphs("Jóváhagyás bekezdés"),
+  feesTitle: text(200, "Bérleti díjak címe"),
+  feesNote: text(500, "Bérleti díjak megjegyzés"),
+  studios: z.array(z.object({
+    title: text(80, "Stúdió neve"),
+    items: z.array(text(300, "Díj sor")).max(20),
+    note: text(300, "Halvány sor"),
+  })).max(6),
+  feesFooter: text(300, "Díjak alatti sor"),
+  cancelLabel: text(80, "Lemondás címke"),
+  cancel: paragraphs("Lemondás bekezdés"),
+});
+
+export async function savePageContent(input: unknown): Promise<ActionResult> {
+  return run(async (email) => {
+    const data = z.object({ hu: pageContentSchema, en: pageContentSchema }).parse(input);
+    await bookingStore("settings", {
+      method: "POST",
+      prefer: "resolution=merge-duplicates",
+      body: { key: PAGE_CONTENT_KEY, data, updated_at: new Date().toISOString(), updated_by: email },
+    });
+    updateTag(PAGE_CONTENT_TAG);
   });
 }
 

@@ -2,10 +2,12 @@ import Image from "next/image";
 import Link from "next/link";
 import { Mail, MapPin, Phone } from "lucide-react";
 import { CONTACT, SCHOOL_URL } from "@/lib/site";
-import { PRIVACY_URL } from "@/lib/privacy";
 import { withBase } from "@/lib/base-path";
+import { privacyPath, t, type Locale } from "@/lib/i18n";
 
-export default function SiteFooter() {
+export default function SiteFooter({ locale = "hu" }: { locale?: Locale }) {
+  const d = t(locale);
+  const schoolHref = locale === "en" ? `${SCHOOL_URL}/en` : SCHOOL_URL;
   return (
     <footer className="relative z-20 border-t border-black/5 bg-white px-5 pb-8 pt-14">
       <div className="mx-auto flex max-w-6xl flex-col items-center gap-8 text-center">
@@ -19,7 +21,7 @@ export default function SiteFooter() {
             <Phone size={18} className="text-[#087c81]" aria-hidden="true" />
             <a href={CONTACT.phoneHref} className="underline underline-offset-2 transition-colors hover:text-[#087c81]">{CONTACT.phone}</a>
           </li>
-          {CONTACT.studios.map((s) => (
+          {d.studios.map((s) => (
             <li key={s.name} className="mx-auto flex max-w-xl items-start justify-center gap-2 leading-relaxed">
               <MapPin size={18} className="mt-1 shrink-0 text-[#087c81]" aria-hidden="true" />
               <span><strong>{s.name}:</strong> {s.address}</span>
@@ -27,8 +29,8 @@ export default function SiteFooter() {
           ))}
         </ul>
         <div className="flex w-full flex-wrap justify-between gap-4 border-t border-black/5 pt-6 text-sm text-gray-600 sm:text-base">
-          <Link href={PRIVACY_URL} className="transition-colors hover:text-black">Adatkezelési tájékoztató</Link>
-          <a href={SCHOOL_URL} className="transition-colors hover:text-black">MD Dance School</a>
+          <Link href={privacyPath(locale)} className="transition-colors hover:text-black">{d.privacy}</Link>
+          <a href={schoolHref} className="transition-colors hover:text-black">MD Dance School</a>
           <span>© {new Date().getFullYear()} MD Dance School</span>
         </div>
       </div>

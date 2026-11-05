@@ -4,6 +4,7 @@ import { buildBookingEmail } from "@/lib/booking-email";
 import { randomBytes } from "node:crypto";
 import { bookingStore, tokenHash } from "@/lib/booking-store";
 import { loadRoomsConfig } from "@/lib/rooms-store";
+import { isLocale, serverMessages } from "@/lib/i18n";
 
 export const runtime = "nodejs";
 
@@ -11,12 +12,14 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const from = params.get("from");
   const to = params.get("to");
+  const lang = params.get("lang");
+  const m = serverMessages(isLocale(lang) ? lang : "hu");
   const validDate = (date: string | null): date is string => typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date) &&
     Number.isFinite(Date.parse(`${date}T00:00:00Z`)) &&
     new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) === date;
   if (!validDate(from) || !validDate(to) || from > to ||
       Date.parse(to) - Date.parse(from) > 42 * 86400000) {
-    return NextResponse.json({ error: "Érvénytelen naptári időszak." }, { status: 400 });
+    return NextResponse.json({ error: m.invalidRange }, { status: 400 });
   }
   try {
     // Ügyféladat, döntési token és állapot nem szerepel a publikus naptárválaszban: a látogató
@@ -34,7 +37,7 @@ export async function GET(request: Request) {
   } catch (caught) {
     const error = caught as { code?: string; status?: number; name?: string; message?: string };
     console.error("Calendar availability failed.", { code: error.code, status: error.status, name: error.name });
-    return NextResponse.json({ error: "A foglaltság nem tölthető be. Próbáld újra később." }, { status: 503 });
+    return NextResponse.json({ error: m.availabilityFailed }, { status: 503 });
   }
 }
 
@@ -43,14 +46,17 @@ export async function POST(request: Request) {
   try {
     input = await request.json();
   } catch {
-    return NextResponse.json({ error: "Érvénytelen kérésformátum." }, { status: 400 });
+    return NextResponse.json({ error: serverMessages("hu").invalidRequest }, { status: 400 });
   }
+  // A foglaló oldal nyelve (hu / en): ezen a nyelven kapja vissza a hibaüzeneteket.
+  const language = (input as { language?: unknown } | null)?.language;
+  const m = serverMessages(isLocale(language) ? language : "hu");
   let config;
   try {
     config = await loadRoomsConfig();
   } catch (caught) {
     console.error("Room settings could not be loaded.", { name: (caught as Error).name });
-    return NextResponse.json({ error: "A foglalási rendszer átmenetileg nem elérhető. Próbáld újra később." }, { status: 503 });
+    return NextResponse.json({ error: m.unavailable }, { status: 503 });
   }
   const { booking, error } = validateBooking(input, new Date(), config);
   if (!booking) return NextResponse.json({ error }, { status: 400 });
@@ -72,7 +78,7 @@ export async function POST(request: Request) {
       !process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     console.error("Booking email or database configuration missing.");
     return NextResponse.json({
-      error: "A foglalási rendszer még nincs beállítva. Kérjük, keresd a stúdiót telefonon.",
+      error: m.notConfigured,
     }, { status: 503 });
   }
 
@@ -89,8 +95,8 @@ export async function POST(request: Request) {
     console.error("Booking persistence failed.", { code: error.code, status: error.status, name: error.name });
     return NextResponse.json({
       error: error.code === "23505"
-        ? "Az egyik idősávra időközben más foglalási igény érkezett. Válassz másik időpontot."
-        : "A foglalási igény mentése nem ellenőrizhető. Újraküldés előtt kérjük, egyeztess a stúdióval.",
+        ? m.slotTaken
+        : m.saveUnverified,
     }, { status: error.code === "23505" ? 409 : 503 });
   }
 
@@ -110,7 +116,7 @@ export async function POST(request: Request) {
       // Kifejezett elutasításnál felszabadítjuk a sávokat. Bizonytalan küldésnél nem.
       await bookingStore(`studio_requests?id=eq.${saved.id}`, { method: "DELETE" });
       return NextResponse.json({
-        error: "Nem sikerült elküldeni a foglalási igényt. Kérjük, próbáld újra később.",
+        error: m.emailRejected,
       }, { status: 502 });
     }
     if (!result.id) throw new Error("Resend acceptance could not be verified.");
@@ -119,7 +125,7 @@ export async function POST(request: Request) {
     const error = caught as { code?: string; status?: number; name?: string; message?: string };
     console.error("Resend booking email request failed.", { name: error.name });
     return NextResponse.json({
-      error: "Az igényt mentettük, de az e-mail-küldés eredménye nem ellenőrizhető. Újraküldés előtt egyeztess a stúdióval.",
+      error: m.emailUnverified,
     }, { status: 502 });
   }
 }

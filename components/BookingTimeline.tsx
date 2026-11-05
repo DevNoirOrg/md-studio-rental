@@ -5,6 +5,7 @@ import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
 import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { canRescheduleBooking, endHour, formatBookingHour, overlaps, type Slot, type StoredSlot } from "@/lib/studio-booking";
 import { openingFor, weeklyRange, type RoomsConfig } from "@/lib/room-config";
+import { useLocale } from "@/components/LocaleContext";
 
 const rowHeight = 32;
 
@@ -70,6 +71,7 @@ export default function BookingTimeline<T extends StoredSlot>({
     height: (endHour(slot) - slot.hour) * 2 * rowHeight,
   });
   const rangeLabel = (slot: Slot) => `${formatBookingHour(slot.hour)}–${formatBookingHour(endHour(slot))}`;
+  const tl = useLocale().d.timeline;
 
   // ── Húzható nyilak: a kezdés (felső nyíl) és a befejezés (alsó nyíl) fél órás lépésekben húzható.
   // Húzás közben csak egy előnézet látszik; elengedéskor egyszer hívjuk az onResize-t.
@@ -127,7 +129,7 @@ export default function BookingTimeline<T extends StoredSlot>({
         const available = allowed(slot);
         return (
           <button key={hour} type="button" data-booking-hour={hour}
-            aria-label={`${room}, ${date}, ${rangeLabel(slot)} – ${available ? "szabad idősáv kiválasztása" : isOpen(hour) ? "nem választható" : "zárva"}`}
+            aria-label={`${room}, ${date}, ${rangeLabel(slot)} – ${available ? tl.selectFree : isOpen(hour) ? tl.notSelectable : tl.closed}`}
             disabled={reschedulingBooking ? readOnly || !availabilityReady : !available}
             aria-disabled={reschedulingBooking && !available ? true : undefined}
             onPointerEnter={(event) => {
@@ -147,7 +149,7 @@ export default function BookingTimeline<T extends StoredSlot>({
             style={{ top: (hour - range.start) * 2 * rowHeight, height: rowHeight }}
           >
             {formatBookingHour(hour)}
-            {!opening && hour === range.start && <span className="ml-auto pr-1 font-bold uppercase tracking-widest">Zárva</span>}
+            {!opening && hour === range.start && <span className="ml-auto pr-1 font-bold uppercase tracking-widest">{tl.closed}</span>}
           </button>
         );
       })}
@@ -159,7 +161,7 @@ export default function BookingTimeline<T extends StoredSlot>({
         <Block key={slot.id || `${slot.hour}-${slot.status}`} style={styleFor(slot)}
           type={clickable ? "button" : undefined}
           onClick={clickable ? (event: React.MouseEvent<HTMLElement>) => onBookingClick?.(slot, event.currentTarget) : undefined}
-          role={clickable ? undefined : "img"} aria-label={`${room}, ${date}, ${rangeLabel(slot)}${label ? `, ${label}` : ""} – ${slot.status === "pending" ? "jóváhagyásra vár" : slot.status === "approved" ? "foglalás alatt" : "foglalt"}`}
+          role={clickable ? undefined : "img"} aria-label={`${room}, ${date}, ${rangeLabel(slot)}${label ? `, ${label}` : ""} – ${slot.status === "pending" ? tl.pending : slot.status === "approved" ? tl.approved : tl.booked}`}
           className={`${clickable ? "cursor-pointer text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-black" : "pointer-events-none"} absolute inset-x-0 z-10 flex flex-col items-start justify-start overflow-hidden border px-2 py-1 text-xs font-bold ${
             slot.status === "pending" ? "border-amber-400 bg-amber-100 text-amber-900" : "border-blue-400 bg-blue-100 text-blue-900"
           }`}
@@ -174,7 +176,7 @@ export default function BookingTimeline<T extends StoredSlot>({
           <div key={slot.hour} style={styleFor(slot)} data-reschedule-selection
             className={`pointer-events-none absolute inset-x-0 z-20 border-2 p-2 text-xs font-bold ${
               allowed(slot) ? "border-[#087c81] bg-[#40CFD5]/30" : "border-red-600 bg-red-100/80 text-red-900"
-            }`}>{rangeLabel(slot)} · {allowed(slot) ? "Új időpont" : "Nem választható"}</div>
+            }`}>{rangeLabel(slot)} · {allowed(slot) ? tl.newTime : tl.notSelectableTitle}</div>
         );
         const earlier = { ...slot, hour: slot.hour - 0.5, durationMinutes: (slot.durationMinutes ?? 60) + 30 };
         const later = { ...slot, durationMinutes: (slot.durationMinutes ?? 60) + 30 };
@@ -183,7 +185,7 @@ export default function BookingTimeline<T extends StoredSlot>({
           className="absolute inset-x-0 z-20 border border-[#087c81] bg-[#40CFD5]/25 text-black">
           {removeOnClick ? (
           <button type="button" onClick={() => onRemove(slot)}
-            aria-label={`${room}, ${date}, ${rangeLabel(slot)} kijelölésének törlése`}
+            aria-label={tl.removeAria(`${room}, ${date}, ${rangeLabel(slot)}`)}
             className="flex h-full w-full items-center justify-center px-1 text-[11px] font-extrabold text-[#065f63] focus-visible:outline focus-visible:outline-2 focus-visible:outline-black">
             {rangeLabel(slot)}
           </button>
@@ -193,15 +195,15 @@ export default function BookingTimeline<T extends StoredSlot>({
             {rangeLabel(slot)}
           </div>
           <button type="button" onClick={() => onRemove(slot)}
-            aria-label={`${room}, ${date}, ${rangeLabel(slot)} kijelölésének törlése`}
-            title="Kijelölés törlése"
+            aria-label={tl.removeAria(`${room}, ${date}, ${rangeLabel(slot)}`)}
+            title={tl.removeTitle}
             className="absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black text-white shadow-sm transition-colors hover:bg-red-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-black"
           ><X size={14} strokeWidth={2.75} aria-hidden="true" /></button>
           </>
           )}
           <button type="button"
-            aria-label={`${room}, ${date}, ${rangeLabel(slot)} kezdése fél órával korábban`}
-            title="Kezdés fél órával korábban — vagy húzd fel/le"
+            aria-label={tl.earlierAria(`${room}, ${date}, ${rangeLabel(slot)}`)}
+            title={tl.earlierTitle}
             disabled={!allowed(earlier, slot) && (slot.durationMinutes ?? 60) <= 60}
             {...dragHandlers("top", slot)}
             onClick={() => {
@@ -211,8 +213,8 @@ export default function BookingTimeline<T extends StoredSlot>({
             className="absolute left-1/2 top-0 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded bg-white/70 hover:bg-white disabled:cursor-not-allowed disabled:opacity-30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-black"
           ><ChevronUp size={20} aria-hidden="true" /></button>
           <button type="button"
-            aria-label={`${room}, ${date}, ${rangeLabel(slot)} befejezése fél órával később`}
-            title="Befejezés fél órával később — vagy húzd fel/le"
+            aria-label={tl.laterAria(`${room}, ${date}, ${rangeLabel(slot)}`)}
+            title={tl.laterTitle}
             disabled={!allowed(later, slot) && (slot.durationMinutes ?? 60) <= 60}
             {...dragHandlers("bottom", slot)}
             onClick={() => {
@@ -238,7 +240,7 @@ export default function BookingTimeline<T extends StoredSlot>({
             allowed(preview) ? "border-[#087c81] bg-[#40CFD5]/25" : "border-red-600 bg-red-200/60 text-red-900"
           }`}>
           {reschedulingBooking && <span className="block p-1 text-[10px] font-bold">
-            {rangeLabel(preview)} · {preview.durationMinutes} perc · {allowed(preview) ? "Átfoglalható" : "Nem fér el / nem választható"}
+            {rangeLabel(preview)} · {preview.durationMinutes} {tl.minutes} · {allowed(preview) ? tl.movable : tl.doesNotFit}
           </span>}
         </div>
       )}

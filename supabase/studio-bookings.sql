@@ -280,6 +280,20 @@ insert into rental.rooms (id, sort) values
   ('Opera - Közepes Terem', 4)
 on conflict (id) do nothing;
 
+-- ---------------------------------------------------------------------
+--  Szövegek (admin → Szövegek): a foglalóoldal óratípus-kártyái és
+--  tájékoztatója magyarul és angolul ('page' kulcs). Üresen az alapértékek.
+-- ---------------------------------------------------------------------
+create table if not exists rental.settings (
+  key        text primary key,
+  data       jsonb not null default '{}'::jsonb,
+  updated_at timestamptz,
+  updated_by text
+);
+alter table rental.settings enable row level security;
+revoke all on rental.settings from anon, authenticated;
+grant all on rental.settings to service_role;
+
 -- Képek tárhelye (Supabase Storage, nyilvános olvasás; feltölteni csak az admin
 -- szerveroldalon kért, egyszer használatos linkkel lehet).
 do $$
