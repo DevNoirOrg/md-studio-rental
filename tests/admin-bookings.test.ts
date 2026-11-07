@@ -142,7 +142,7 @@ test("admin bookings reject unauthenticated access and expose only intended fiel
     let calls = 0;
     globalThis.fetch = async (url) => {
       calls++;
-      assert.ok(url.includes("studio_requests!inner(customer,lesson_type)"));
+      assert.ok(url.includes("studio_requests!inner(id,customer,lesson_type,payment_status"));
       assert.ok(!url.includes("token_hash"));
       return Response.json([{
         id: "slot-id", room: "Astoria - Nagy Terem", date: "2026-10-22",

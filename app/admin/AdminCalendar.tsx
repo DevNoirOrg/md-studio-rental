@@ -27,8 +27,10 @@ function addDays(date: Date, days: number) {
   return result;
 }
 
-export default function AdminCalendar({ config, initialDate, initialRoom }: {
+export default function AdminCalendar({ config, initialDate, initialRoom, paymentsEnabled = false }: {
   config: RoomsConfig;
+  /** Online fizetés bekapcsolva (admin → Fizetés és e-mailek) — az új foglalásnál küldhető fizetési link. */
+  paymentsEnabled?: boolean;
   /** A Google Naptár eseményéből nyitott link: ?datum=YYYY-MM-DD&terem=<index> */
   initialDate?: string;
   initialRoom?: Room;
@@ -252,7 +254,8 @@ export default function AdminCalendar({ config, initialDate, initialRoom }: {
         <span className="rounded bg-gray-200 px-2 py-1 text-gray-700">Elmúlt időpont</span>
         <span className="md-closed-slot rounded px-2 py-1 text-gray-700">Zárva</span>
         <span className="rounded bg-amber-100 px-2 py-1 text-amber-900">Jóváhagyásra vár</span>
-        <span className="rounded bg-blue-100 px-2 py-1 text-blue-900">Foglalás alatt</span>
+        <span className="rounded bg-violet-100 px-2 py-1 text-violet-900">Fizetésre vár</span>
+        <span className="rounded bg-blue-100 px-2 py-1 text-blue-900">Foglalás alatt / fizetve</span>
       </div>
       <div className="mb-5 min-h-5" aria-live="polite">
       {error ? (
@@ -348,6 +351,7 @@ export default function AdminCalendar({ config, initialDate, initialRoom }: {
       )}
       {!rescheduling && selectedSlots.length > 0 && (
         <AdminBookingForm config={config} slots={selectedSlots} lessonType={lessonType} ready={ready} onRemove={removeSlot}
+          paymentsEnabled={paymentsEnabled}
           onLessonTypeChange={(type) => {
             setLessonType(type);
             setSaved(false);
@@ -361,6 +365,7 @@ export default function AdminCalendar({ config, initialDate, initialRoom }: {
       )}
       {ready && selectedBooking && (
         <BookingDetails key={selectedBooking.id} booking={selectedBooking} onClose={closeDetails}
+          onUpdated={() => setRetry((value) => value + 1)}
           onStartReschedule={(booking) => {
             setSelectedId(null);
             setRescheduling(booking);

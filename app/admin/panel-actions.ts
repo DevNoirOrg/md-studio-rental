@@ -16,6 +16,9 @@ import { PAGE_CONTENT_KEY } from "@/lib/page-content";
 import { PAGE_CONTENT_TAG } from "@/lib/page-content-store";
 import { endHour, formatBookingHour } from "@/lib/studio-booking";
 import { syncCalendar } from "@/lib/google-calendar";
+import { PAYMENT_SETTINGS_KEY, VAT_OPTIONS } from "@/lib/payment-settings";
+import { billingoConfigured, listBillingoOptions, type BillingoOption } from "@/lib/billingo";
+import { markPaidManually } from "@/lib/payment-flow";
 
 /*
   Az admin felület (Termek, Adminok) írási műveletei. Mindegyik:
@@ -197,6 +200,56 @@ export async function savePageContent(input: unknown): Promise<ActionResult> {
       body: { key: PAGE_CONTENT_KEY, data, updated_at: new Date().toISOString(), updated_by: email },
     });
     updateTag(PAGE_CONTENT_TAG);
+  });
+}
+
+// ---------------------------------------------------------------------
+//  Fizetés és e-mailek (Stripe, Billingo, bejutási infók)
+// ---------------------------------------------------------------------
+const bilingual = (max: number, label: string) => z.object({ hu: text(max, label), en: text(max, `${label} (angol)`) });
+const paymentSettingsSchema = z.object({
+  enabled: z.boolean(),
+  deadlineEnabled: z.boolean(),
+  deadlineHours: z.number({ error: "Határidő: adj meg egy számot." }).int("Határidő: egész óra legyen.")
+    .min(3, "Határidő: legalább 3 óra.").max(24 * 30, "Határidő: legfeljebb 30 nap."),
+  vat: z.enum(VAT_OPTIONS),
+  billingoBlockId: z.number().int().positive().nullable(),
+  billingoBankAccountId: z.number().int().positive().nullable(),
+  itemName: bilingual(120, "Számlatétel megnevezése"),
+  access: z.object({ astoria: bilingual(4000, "Bejutási infók (Astoria)"), opera: bilingual(4000, "Bejutási infók (Opera)") }),
+});
+
+export async function savePaymentSettings(input: unknown): Promise<ActionResult> {
+  return run(async (email) => {
+    const data = paymentSettingsSchema.parse(input);
+    if (!data.itemName.hu.trim()) return fail("A számlatétel megnevezése nem lehet üres.");
+    await bookingStore("settings", {
+      method: "POST",
+      prefer: "resolution=merge-duplicates",
+      body: { key: PAYMENT_SETTINGS_KEY, data, updated_at: new Date().toISOString(), updated_by: email },
+    });
+  });
+}
+
+/** A Billingo számlatömbjei és bankszámlái (a választólistákhoz). */
+export async function loadBillingoOptions(): Promise<
+  { ok: true; blocks: BillingoOption[]; bankAccounts: BillingoOption[] } | { ok: false; error: string }
+> {
+  try {
+    await assertAdmin();
+    if (!billingoConfigured()) return { ok: false, error: "A Billingo nincs bekötve (BILLINGO_API_KEY a Vercelben)." };
+    return { ok: true, ...(await listBillingoOptions()) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "A Billingo adatai nem tölthetők be." };
+  }
+}
+
+/** „Fizetettnek jelölöm” (pl. átutalás / készpénz) — nincs automatikus számla és bejutási e-mail. */
+export async function markRequestPaid(requestIdInput: string): Promise<ActionResult> {
+  return run(async () => {
+    const requestId = z.string().uuid("Érvénytelen foglalás.").parse(requestIdInput);
+    if (!(await markPaidManually(requestId))) return fail("Ez a foglalás már fizetettként van jelölve.");
+    return { ok: true, message: "Fizetettnek jelölve." };
   });
 }
 

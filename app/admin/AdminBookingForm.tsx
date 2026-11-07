@@ -17,6 +17,7 @@ interface AdminBookingFormProps {
   onRemove: (slot: Slot) => void;
   onSaved: () => void;
   onLessonTypeChange: (type: LessonType) => void;
+  paymentsEnabled?: boolean;
 }
 
 const lessonOptions: Array<{ id: LessonType; title: string; capacity: string; Icon: typeof UserRound }> = [
@@ -25,8 +26,11 @@ const lessonOptions: Array<{ id: LessonType; title: string; capacity: string; Ic
   { id: "csoportos", title: "Csoportos óra", capacity: "36 fő", Icon: Users },
 ];
 
-export default function AdminBookingForm({ config, slots, lessonType, ready, onRemove, onSaved, onLessonTypeChange }: AdminBookingFormProps) {
+export default function AdminBookingForm({ config, slots, lessonType, ready, onRemove, onSaved, onLessonTypeChange, paymentsEnabled = false }: AdminBookingFormProps) {
   const [saving, setSaving] = useState(false);
+  const [sendPaymentLink, setSendPaymentLink] = useState(false);
+  const [sendAccess, setSendAccess] = useState(false);
+  const linkOn = paymentsEnabled && sendPaymentLink;
   const [error, setError] = useState("");
   const savingRef = useRef(false);
   const total = slots.reduce((sum, slot) => sum + bookingPrice(slot, lessonType, config), 0);
@@ -46,7 +50,7 @@ export default function AdminBookingForm({ config, slots, lessonType, ready, onR
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ lessonType, slots, customer: {
           name: data.get("name"), email: data.get("email"), phone: data.get("phone"),
-        } }),
+        }, options: { sendPaymentLink: linkOn, sendAccess: !linkOn && sendAccess } }),
       });
       const result = await response.json();
       if (!response.ok || result.success !== true) {
@@ -107,7 +111,29 @@ export default function AdminBookingForm({ config, slots, lessonType, ready, onR
           <label className="text-sm font-bold">E-mail-cím<input name="email" type="email" required maxLength={254} autoComplete="email" className="md-input mt-2" /></label>
           <label className="text-sm font-bold">Telefonszám<input name="phone" type="tel" required maxLength={40} autoComplete="tel" placeholder="+36…" className="md-input mt-2" /></label>
         </fieldset>
-        <p className="text-sm text-gray-600">A foglalás azonnal „Foglalás alatt” állapotba kerül.</p>
+        <fieldset disabled={saving} className="space-y-2 rounded-xl bg-white p-4 text-sm">
+          <legend className="sr-only">E-mail az ügyfélnek</legend>
+          {paymentsEnabled && (
+            <label className="flex items-start gap-2 font-bold">
+              <input type="checkbox" className="mt-0.5 h-4 w-4" checked={sendPaymentLink} onChange={(e) => setSendPaymentLink(e.target.checked)} />
+              <span>Fizetési link küldése
+                <span className="block font-normal text-gray-600">Az ügyfél e-mailben kap egy online fizetési linket (a határidő az admin → Fizetés és e-mailek beállítása szerint). Fizetés után automatikusan megy a számla és a bejutási infók.</span>
+              </span>
+            </label>
+          )}
+          <label className={`flex items-start gap-2 font-bold ${linkOn ? "opacity-50" : ""}`}>
+            <input type="checkbox" className="mt-0.5 h-4 w-4" checked={!linkOn && sendAccess} disabled={linkOn} onChange={(e) => setSendAccess(e.target.checked)} />
+            <span>Bejutási infók küldése
+              <span className="block font-normal text-gray-600">
+                {linkOn ? "A fizetés után automatikusan megy." : "Az ügyfél most e-mailben megkapja az időpontokat és a bejutási infókat (online fizetés nélkül)."}
+              </span>
+            </span>
+          </label>
+        </fieldset>
+        <p className="text-sm text-gray-600">
+          {linkOn ? "A foglalás „Fizetésre vár” állapotba kerül." : "A foglalás azonnal „Foglalás alatt” állapotba kerül."}
+          {!linkOn && !sendAccess && " Az ügyfél nem kap e-mailt."}
+        </p>
         {error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{error}</p>}
         <button type="submit" disabled={saving || !ready || !lessonTypeOk} className="rounded-xl bg-[#40CFD5] px-5 py-3 font-extrabold disabled:opacity-50">
           {saving ? "Mentés…" : "Foglalás mentése"}

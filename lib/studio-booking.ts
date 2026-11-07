@@ -19,11 +19,23 @@ export interface Slot {
   durationMinutes?: number;
 }
 
-export type SlotStatus = "pending" | "approved" | "rejected";
+export type SlotStatus = "pending" | "approved" | "rejected" | "expired";
 
 export interface StoredSlot extends Slot {
   id?: string;
   status?: SlotStatus | string;
+  /** Az igény fizetési állapota (admin): awaiting = fizetésre vár, paid = fizetve. */
+  paymentStatus?: "awaiting" | "paid" | "expired" | null | string;
+}
+
+/** Az admin naptárban: az igény fizetési és számla adatai. */
+export interface AdminPayment {
+  requestId: string;
+  status: "awaiting" | "paid" | "expired" | null;
+  due: string | null;
+  paidAt: string | null;
+  via: "stripe" | "manual" | null;
+  invoice: { status: "pending" | "issued" | "error" | "skipped" | null; number: string | null; error: string | null };
 }
 
 export interface Customer {
@@ -47,6 +59,8 @@ export interface AdminSlot {
   customer: Customer;
   /** Google Naptár állapot: pending = szinkronra vár, synced = bent van a naptárban. */
   calendar?: { pending: boolean; synced: boolean; error: string | null };
+  payment?: AdminPayment;
+  paymentStatus?: AdminPayment["status"];
 }
 
 export interface PricedSlot extends Required<Pick<Slot, "room" | "date" | "hour" | "durationMinutes">> {

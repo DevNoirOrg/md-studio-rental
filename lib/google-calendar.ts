@@ -154,6 +154,8 @@ export interface CalendarSlot {
   price: number;
   lessonType: LessonType;
   customer: Customer;
+  /** Az igény fizetési állapota: awaiting → a címben „(fizetésre vár)”. */
+  paymentStatus?: string | null;
 }
 
 const currency = new Intl.NumberFormat("hu-HU", { style: "currency", currency: "HUF", maximumFractionDigits: 0 });
@@ -175,6 +177,7 @@ export function buildEvent(slot: CalendarSlot, adminUrl?: string) {
     `Óratípus: ${lesson}`,
     `Időpont: ${start}–${formatBookingHour(end)} (${slot.durationMinutes} perc)`,
     `Ár: ${currency.format(slot.price)}`,
+    ...(slot.paymentStatus === "awaiting" ? ["Fizetés: még nem fizetett (fizetésre vár)"] : slot.paymentStatus === "paid" ? ["Fizetés: fizetve"] : []),
     ...(adminUrl ? ["", `Megnyitás az adminban: ${adminUrl}`] : []),
     "",
     "Ezt az eseményt a foglalási rendszer kezeli — itt ne módosítsd, mert felülíródhat.",
@@ -182,7 +185,7 @@ export function buildEvent(slot: CalendarSlot, adminUrl?: string) {
   return {
     id: eventIdFor(slot.id),
     status: "confirmed",
-    summary: `${room?.short ?? slot.room} · ${lesson} – ${slot.customer.name}${slot.customer.language === "en" ? " (EN)" : ""}`,
+    summary: `${room?.short ?? slot.room} · ${lesson} – ${slot.customer.name}${slot.customer.language === "en" ? " (EN)" : ""}${slot.paymentStatus === "awaiting" ? " (fizetésre vár)" : ""}`,
     ...(room ? { colorId: room.colorId } : {}),
     description,
     start: { dateTime: `${slot.date}T${start}:00`, timeZone: TIME_ZONE },
@@ -232,7 +235,7 @@ interface DirtyRow {
   duration_minutes: number;
   price: number;
   status: string;
-  studio_requests: { customer: Customer; lesson_type: LessonType } | null;
+  studio_requests: { customer: Customer; lesson_type: LessonType; payment_status?: string | null } | null;
 }
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err)).slice(0, 500);
@@ -264,7 +267,7 @@ async function runSync(): Promise<SyncResult> {
 
   // 2) új / módosult idősávok
   const dirty = await bookingStore<DirtyRow[]>(
-    `studio_slots?select=id,room,date,hour,duration_minutes,price,status,studio_requests(customer,lesson_type)&gcal_dirty=is.true&order=date,hour&limit=${BATCH}`,
+    `studio_slots?select=id,room,date,hour,duration_minutes,price,status,studio_requests(customer,lesson_type,payment_status)&gcal_dirty=is.true&order=date,hour&limit=${BATCH}`,
   );
   for (const row of dirty) {
     // csak akkor jelöljük késznek, ha közben nem változott (különben a következő szinkron újra elvégzi)
@@ -278,6 +281,7 @@ async function runSync(): Promise<SyncResult> {
         const slot: CalendarSlot = {
           id: row.id, room: row.room, date: row.date, hour: Number(row.hour), durationMinutes: row.duration_minutes,
           price: row.price, lessonType: row.studio_requests!.lesson_type, customer: row.studio_requests!.customer,
+          paymentStatus: row.studio_requests!.payment_status ?? null,
         };
         await upsertEvent(token, calId, buildEvent(slot, adminUrlFor(slot)));
         result.written++;

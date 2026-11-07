@@ -3,5 +3,6 @@ export const adminNav = [
   { href: "/admin", label: "Foglalások" },
   { href: "/admin/termek", label: "Termek" },
   { href: "/admin/szovegek", label: "Szövegek" },
+  { href: "/admin/fizetes", label: "Fizetés és e-mailek" },
   { href: "/admin/adminok", label: "Adminok" },
 ] as const;

@@ -5,8 +5,12 @@ import { randomBytes } from "node:crypto";
 import { validateBooking, validateBookingTime } from "@/lib/studio-booking";
 import { loadRoomsConfig } from "@/lib/rooms-store";
 import { scheduleCalendarSync } from "@/lib/calendar-schedule";
+import { notifyDecisionIfComplete, runInBackground, schedulePaymentJobs, startAdminBookingFlow } from "@/lib/payment-flow";
 
 export const dynamic = "force-dynamic";
+
+// az admin naptárban a foglaláshoz tartozó igény adatai (ügyfél, óratípus, fizetés, számla)
+const ADMIN_REQUEST_FIELDS = "id,customer,lesson_type,payment_status,payment_due,paid_at,paid_via,invoice_status,invoice_number,invoice_error";
 
 interface AdminSlotRow {
   id: string;
@@ -19,7 +23,18 @@ interface AdminSlotRow {
   gcal_dirty?: boolean;
   gcal_synced_at?: string | null;
   gcal_error?: string | null;
-  studio_requests: { customer: { name: string; email: string; phone: string; language?: string }; lesson_type: string };
+  studio_requests: {
+    id?: string;
+    customer: { name: string; email: string; phone: string; language?: string };
+    lesson_type: string;
+    payment_status?: string | null;
+    payment_due?: string | null;
+    paid_at?: string | null;
+    paid_via?: string | null;
+    invoice_status?: string | null;
+    invoice_number?: string | null;
+    invoice_error?: string | null;
+  };
 }
 
 export async function PATCH(request: NextRequest) {
@@ -94,7 +109,7 @@ export async function DELETE(request: NextRequest) {
     if (!id || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(id)) {
       return NextResponse.json({ error: "Érvénytelen foglalásazonosító." }, { status: 400, headers });
     }
-    const deleted = await bookingStore(`studio_slots?id=eq.${id}&status=in.(pending,approved)&select=id`, {
+    const deleted = await bookingStore<Array<{ id: string; request_id?: string; status?: string }>>(`studio_slots?id=eq.${id}&status=in.(pending,approved)&select=id,request_id,status`, {
       method: "DELETE", returnRepresentation: true,
     });
     if (!Array.isArray(deleted)) throw new Error("Invalid booking deletion response.");
@@ -102,6 +117,9 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "A foglalás már nem található vagy nem törölhető. Frissítsd a naptárt." }, { status: 404, headers });
     }
     scheduleCalendarSync();
+    // egy döntésre váró időpont törlése után az igény „lezárulhat” → e-mail az ügyfélnek
+    const requestId = deleted[0]?.request_id;
+    if (requestId && deleted[0]?.status === "pending") runInBackground("decision email", () => notifyDecisionIfComplete(requestId));
     return NextResponse.json({ success: true }, { headers });
   } catch (caught) {
     const error = caught as { code?: string; name?: string };
@@ -127,12 +145,19 @@ export async function POST(request: NextRequest) {
     }
     const { booking, error } = validateBooking(input, new Date(), await loadRoomsConfig());
     if (!booking) return NextResponse.json({ error }, { status: 400, headers });
-    await bookingStore("rpc/create_admin_studio_request", {
+    const created = await bookingStore<{ id?: string } | null>("rpc/create_admin_studio_request", {
       method: "POST",
       body: { p_customer: booking.customer, p_lesson_type: booking.lessonType,
         p_token_hash: randomBytes(32).toString("hex"), p_slots: booking.slots },
     });
     scheduleCalendarSync();
+    // opcionális: fizetési link és/vagy bejutási infók az ügyfélnek
+    const options = (input as { options?: { sendPaymentLink?: unknown; sendAccess?: unknown } }).options;
+    const flow = { sendPaymentLink: options?.sendPaymentLink === true, sendAccess: options?.sendAccess === true };
+    if (created?.id && (flow.sendPaymentLink || flow.sendAccess)) {
+      const requestId = created.id;
+      runInBackground("admin booking emails", () => startAdminBookingFlow(requestId, flow));
+    }
     return NextResponse.json({ success: true }, { headers });
   } catch (caught) {
     const error = caught as { code?: string; name?: string };
@@ -162,7 +187,7 @@ export async function GET(request: NextRequest) {
     }
     const slots: Array<Record<string, unknown>> = [];
     for (let offset = 0; ; offset += 500) {
-      const page = await bookingStore<AdminSlotRow[]>(`studio_slots?select=id,room,date,hour,status,price,duration_minutes,gcal_dirty,gcal_synced_at,gcal_error,studio_requests!inner(customer,lesson_type)&date=gte.${from}&date=lte.${to}&status=in.(pending,approved)&order=date,hour,room,id&limit=500&offset=${offset}`);
+      const page = await bookingStore<AdminSlotRow[]>(`studio_slots?select=id,room,date,hour,status,price,duration_minutes,gcal_dirty,gcal_synced_at,gcal_error,studio_requests!inner(${ADMIN_REQUEST_FIELDS})&date=gte.${from}&date=lte.${to}&status=in.(pending,approved)&order=date,hour,room,id&limit=500&offset=${offset}`);
       slots.push(...page.map(({ duration_minutes, studio_requests, gcal_dirty, gcal_synced_at, gcal_error, ...slot }) => ({
         ...slot, durationMinutes: duration_minutes,
         calendar: { pending: !!gcal_dirty, synced: !!gcal_synced_at, error: gcal_error ?? null },
@@ -173,9 +198,21 @@ export async function GET(request: NextRequest) {
           ...(studio_requests.customer.language === "en" ? { language: "en" as const } : {}),
         },
         lessonType: studio_requests.lesson_type,
+        ...(studio_requests.id ? {
+          payment: {
+            requestId: studio_requests.id,
+            status: studio_requests.payment_status ?? null,
+            due: studio_requests.payment_due ?? null,
+            paidAt: studio_requests.paid_at ?? null,
+            via: studio_requests.paid_via ?? null,
+            invoice: { status: studio_requests.invoice_status ?? null, number: studio_requests.invoice_number ?? null, error: studio_requests.invoice_error ?? null },
+          },
+          paymentStatus: studio_requests.payment_status ?? null,
+        } : {}),
       })));
       if (page.length < 500) break;
     }
+    schedulePaymentJobs();
     return NextResponse.json({ slots }, { headers });
   } catch (caught) {
     const error = caught as { code?: string; name?: string };

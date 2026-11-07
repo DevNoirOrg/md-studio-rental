@@ -161,9 +161,11 @@ export default function BookingTimeline<T extends StoredSlot>({
         <Block key={slot.id || `${slot.hour}-${slot.status}`} style={styleFor(slot)}
           type={clickable ? "button" : undefined}
           onClick={clickable ? (event: React.MouseEvent<HTMLElement>) => onBookingClick?.(slot, event.currentTarget) : undefined}
-          role={clickable ? undefined : "img"} aria-label={`${room}, ${date}, ${rangeLabel(slot)}${label ? `, ${label}` : ""} – ${slot.status === "pending" ? tl.pending : slot.status === "approved" ? tl.approved : tl.booked}`}
+          role={clickable ? undefined : "img"} aria-label={`${room}, ${date}, ${rangeLabel(slot)}${label ? `, ${label}` : ""} – ${slot.status === "pending" ? tl.pending : slot.paymentStatus === "awaiting" ? tl.awaitingPayment : slot.status === "approved" ? tl.approved : tl.booked}`}
           className={`${clickable ? "cursor-pointer text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-black" : "pointer-events-none"} absolute inset-x-0 z-10 flex flex-col items-start justify-start overflow-hidden border px-2 py-1 text-xs font-bold ${
-            slot.status === "pending" ? "border-amber-400 bg-amber-100 text-amber-900" : "border-blue-400 bg-blue-100 text-blue-900"
+            slot.status === "pending" ? "border-amber-400 bg-amber-100 text-amber-900"
+              : slot.paymentStatus === "awaiting" ? "border-violet-400 bg-violet-100 text-violet-900"
+              : "border-blue-400 bg-blue-100 text-blue-900"
           }`}
         >
           <span className="block">{rangeLabel(slot)}</span>

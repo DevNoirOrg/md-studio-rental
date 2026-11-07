@@ -88,12 +88,19 @@ test("booking API and real PostgreSQL transactions cover decisions, conflicts an
   let mailMode = "accepted";
   let mailCount = 0;
   let payload;
+  const customerMails = [];
   let failReads = false;
   console.error = () => {};
   globalThis.fetch = async (url, options = {}) => {
     if (url === "https://api.resend.com/emails") {
+      const body = JSON.parse(options.body);
+      // az ügyfélnek küldött visszaigazolás külön számít (a foglalás sikerét nem befolyásolja)
+      if (body.to[0] !== "notifications@example.hu") {
+        customerMails.push(body);
+        return Response.json({ id: "customer-message-id" });
+      }
       mailCount++;
-      payload = JSON.parse(options.body);
+      payload = body;
       if (mailMode === "network") throw new Error("test network failure");
       if (mailMode === "rejected") return Response.json({ name: "validation_error" }, { status: 422 });
       return Response.json({ id: "test-message-id" });
@@ -179,6 +186,12 @@ test("booking API and real PostgreSQL transactions cover decisions, conflicts an
       const rawToken = new URL(payload.text.match(/Jóváhagyás: (\S+)/)[1]).searchParams.get("token");
       assert.equal(stored.token_hash.length, 64);
       assert.notEqual(stored.token_hash, rawToken);
+      // az ügyfél visszaigazolást kap (a válasz után, a háttérben)
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(customerMails.length, 1);
+      assert.deepEqual(customerMails[0].to, ["test@example.hu"]);
+      assert.ok(customerMails[0].subject.startsWith("Megkaptuk a foglalási igényedet"));
+      assert.equal(customerMails[0].reply_to, "info.mddancestudio@gmail.com");
     });
 
     await t.test("atomic duplicate request is rejected without an orphan request or extra email", async () => {

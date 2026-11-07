@@ -3,6 +3,7 @@ import { bookingStore, decisionInput, tokenHash } from "@/lib/booking-store";
 import { loadRoomsConfig } from "@/lib/rooms-store";
 import { defaultRoomsConfig, roomLabel } from "@/lib/room-config";
 import { scheduleCalendarSync } from "@/lib/calendar-schedule";
+import { notifyDecisionIfComplete, runInBackground } from "@/lib/payment-flow";
 
 export const runtime = "nodejs";
 
@@ -75,6 +76,13 @@ export async function POST(request: Request) {
     }
     // jóváhagyott idősáv → a terem Google Naptárába (a válasz után, a háttérben)
     if (result.changed > 0 && decision.p_action !== "reject") scheduleCalendarSync();
+    // ha az igény minden időpontjáról döntöttek → e-mail az ügyfélnek (elfogadva fizetési linkkel / elutasítva)
+    if (result.changed > 0) {
+      runInBackground("decision email", async () => {
+        const rows = await bookingStore<Array<{ id: string }>>(`studio_requests?select=id&token_hash=eq.${decision.p_token_hash}`);
+        if (rows[0]) await notifyDecisionIfComplete(rows[0].id);
+      });
+    }
     return NextResponse.json({ success: true, changed: result.changed });
   } catch (caught) {
     const error = caught as { code?: string; status?: number; name?: string; message?: string };

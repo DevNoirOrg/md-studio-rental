@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { endHour, formatBookingHour, type AdminSlot, type LessonType } from "@/lib/studio-booking";
 import { withBase } from "@/lib/base-path";
+import { markRequestPaid } from "@/app/admin/panel-actions";
 
 const lessonNames: Record<LessonType, string> = { privat: "Privát óra", kiscsoportos: "Kiscsoportos óra", csoportos: "Csoportos óra" };
 const currency = new Intl.NumberFormat("hu-HU", { style: "currency", currency: "HUF", maximumFractionDigits: 0 });
@@ -13,9 +14,53 @@ interface BookingDetailsProps {
   onClose: (restoreFocus?: boolean) => void;
   onDeleted: (id: string) => void;
   onStartReschedule: (booking: AdminSlot) => void;
+  /** A foglalás változott (pl. fizetettnek jelölve) → a naptár frissítése. */
+  onUpdated?: () => void;
 }
 
-export default function BookingDetails({ booking, onClose, onDeleted, onStartReschedule }: BookingDetailsProps) {
+const dateTime = (iso: string) =>
+  new Intl.DateTimeFormat("hu-HU", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Budapest" }).format(new Date(iso));
+
+/** A foglalás állapota a fizetéssel együtt: jóváhagyásra vár / fizetésre vár / fizetve / foglalás alatt. */
+function statusOf(booking: AdminSlot): { label: string; cls: string } {
+  if (booking.status === "pending") return { label: "Jóváhagyásra vár", cls: "bg-amber-100 text-amber-900" };
+  if (booking.payment?.status === "awaiting") return { label: "Fizetésre vár", cls: "bg-violet-100 text-violet-900" };
+  if (booking.payment?.status === "paid") return { label: "Fizetve", cls: "bg-blue-100 text-blue-900" };
+  return { label: "Foglalás alatt", cls: "bg-blue-100 text-blue-900" };
+}
+
+const invoiceText: Record<string, string> = {
+  pending: "Kiállítás folyamatban…",
+  issued: "Kiállítva",
+  error: "Hiba",
+  skipped: "Nincs automatikus számla",
+};
+
+export default function BookingDetails({ booking, onClose, onDeleted, onStartReschedule, onUpdated }: BookingDetailsProps) {
+  const [marking, setMarking] = useState(false);
+  const [confirmPaid, setConfirmPaid] = useState(false);
+  const [paidMessage, setPaidMessage] = useState("");
+  async function markPaid() {
+    if (!booking.payment || busyRef.current) return;
+    busyRef.current = true;
+    setMarking(true);
+    setError("");
+    try {
+      const result = await markRequestPaid(booking.payment.requestId);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setPaidMessage("Fizetettnek jelölve.");
+      setConfirmPaid(false);
+      onUpdated?.();
+    } catch {
+      setError("Nem sikerült menteni. Próbáld újra.");
+    } finally {
+      busyRef.current = false;
+      setMarking(false);
+    }
+  }
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
@@ -79,9 +124,41 @@ export default function BookingDetails({ booking, onClose, onDeleted, onStartRes
           <X size={22} aria-hidden="true" />
         </button>
       </div>
-      <span className={`inline-block rounded-lg px-3 py-2 text-sm font-bold ${
-        booking.status === "pending" ? "bg-amber-100 text-amber-900" : "bg-blue-100 text-blue-900"
-      }`}>{booking.status === "pending" ? "Jóváhagyásra vár" : "Foglalás alatt"}</span>
+      <span className={`inline-block rounded-lg px-3 py-2 text-sm font-bold ${statusOf(booking).cls}`}>{statusOf(booking).label}</span>
+      {booking.status === "approved" && booking.payment && (
+        <section aria-label="Fizetés" className="mt-5 space-y-2 rounded-2xl bg-gray-50 p-4 text-sm">
+          {booking.payment.status === "awaiting" && (
+            <p><strong>Fizetési határidő:</strong> {booking.payment.due ? dateTime(booking.payment.due) : "nincs (a foglalás kezdetéig fizethet)"}</p>
+          )}
+          {booking.payment.status === "paid" && booking.payment.paidAt && (
+            <p><strong>Fizetve:</strong> {dateTime(booking.payment.paidAt)} · {booking.payment.via === "stripe" ? "online, bankkártyával" : "kézzel jelölve"}</p>
+          )}
+          {booking.payment.status === "paid" && booking.payment.invoice.status && (
+            <p className={booking.payment.invoice.status === "error" ? "text-red-800" : ""}>
+              <strong>Számla:</strong> {invoiceText[booking.payment.invoice.status] ?? booking.payment.invoice.status}
+              {booking.payment.invoice.number && ` · ${booking.payment.invoice.number}`}
+              {booking.payment.invoice.error && <span className="mt-1 block text-xs">{booking.payment.invoice.error}</span>}
+            </p>
+          )}
+          {booking.payment.status !== "paid" && (
+            confirmPaid ? (
+              <div className="rounded-xl border border-blue-200 bg-white p-3">
+                <p className="font-bold">Fizetettnek jelölöd az igény összes jóváhagyott időpontját?</p>
+                <p className="mt-1 text-gray-600">Pl. átutalásnál vagy helyszíni fizetésnél. Ilyenkor nem készül automatikus számla, és nem megy bejutási e-mail.</p>
+                <div className="mt-3 flex gap-2">
+                  <button type="button" disabled={marking} onClick={markPaid}
+                    className="rounded-lg bg-blue-600 px-3 py-2 font-bold text-white hover:bg-blue-700 disabled:opacity-50">{marking ? "Mentés…" : "Igen, fizetett"}</button>
+                  <button type="button" disabled={marking} onClick={() => setConfirmPaid(false)} className="rounded-lg bg-gray-100 px-3 py-2 font-bold">Mégse</button>
+                </div>
+              </div>
+            ) : (
+              <button type="button" onClick={() => { setConfirmPaid(true); setPaidMessage(""); }}
+                className="font-bold text-[#087c81] underline underline-offset-2">Fizetettnek jelölöm</button>
+            )
+          )}
+          {paidMessage && <p role="status" className="font-bold text-blue-900">{paidMessage}</p>}
+        </section>
+      )}
       <dl className="mt-6 space-y-5 text-sm">
         <div><dt className="text-gray-500">Terem</dt><dd className="mt-1 font-bold">{booking.room}</dd></div>
         <div><dt className="text-gray-500">Dátum</dt><dd className="mt-1 font-bold">

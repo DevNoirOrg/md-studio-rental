@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import { bookingStore, tokenHash } from "@/lib/booking-store";
 import { loadRoomsConfig } from "@/lib/rooms-store";
 import { isLocale, serverMessages } from "@/lib/i18n";
+import { runInBackground, schedulePaymentJobs, sendReceivedEmail } from "@/lib/payment-flow";
 
 export const runtime = "nodejs";
 
@@ -33,6 +34,8 @@ export async function GET(request: Request) {
       })));
       if (page.length < 500) break;
     }
+    // a fizetési határidők / emlékeztetők kezelése (percenként legfeljebb egyszer, a válasz után)
+    schedulePaymentJobs();
     return NextResponse.json({ slots }, { headers: { "Cache-Control": "no-store" } });
   } catch (caught) {
     const error = caught as { code?: string; status?: number; name?: string; message?: string };
@@ -120,6 +123,8 @@ export async function POST(request: Request) {
       }, { status: 502 });
     }
     if (!result.id) throw new Error("Resend acceptance could not be verified.");
+    // visszaigazolás az ügyfélnek („megkaptuk a foglalási igényedet”) — a válasz után, a háttérben
+    runInBackground("received email", () => sendReceivedEmail({ customer: booking.customer, slots: saved.slots }));
     return NextResponse.json({ success: true });
   } catch (caught) {
     const error = caught as { code?: string; status?: number; name?: string; message?: string };

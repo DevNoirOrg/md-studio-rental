@@ -1,0 +1,5 @@
+{
+  "crons": [
+    { "path": "/studio-berles/api/cron/payments", "schedule": "17 6 * * *" }
+  ]
+}
