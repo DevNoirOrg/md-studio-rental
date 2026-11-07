@@ -14,6 +14,12 @@ export function stripeConfigured(): boolean {
   return !!process.env.STRIPE_SECRET_KEY?.trim();
 }
 
+/** Teszt (sandbox) kulccsal megy-e — ilyenkor valódi pénz nem mozog, és számla helyett díjbekérő készül. */
+export function stripeTestMode(): boolean {
+  const key = process.env.STRIPE_SECRET_KEY?.trim() ?? "";
+  return key.startsWith("sk_test_") || key.startsWith("rk_test_");
+}
+
 /** Stripe-stílusú form-kódolás beágyazott objektumokhoz és tömbökhöz (line_items[0][price_data][…]). */
 export function formEncode(value: Record<string, unknown>): string {
   const params = new URLSearchParams();

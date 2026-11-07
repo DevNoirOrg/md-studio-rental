@@ -94,7 +94,7 @@ test("Billingo: magánszemély / cég / külföldi vevő és bruttó óradíjas 
   assert.equal(partnerPayload({ ...base, taxNumber: "12345678-1-42" }).tax_type, "HAS_TAX_NUMBER");
   assert.equal(partnerPayload({ ...base, country: "de" }).tax_type, "FOREIGN");
   const doc = documentPayload({
-    partnerId: 1, blockId: 2, bankAccountId: null, vat: "27%", language: "hu", date: "2026-11-10",
+    type: "invoice", partnerId: 1, blockId: 2, bankAccountId: null, vat: "27%", language: "hu", date: "2026-11-10",
     lines: [{ name: "Teremhasználat", grossPrice: 4500, hours: 1.5 }], comment: "",
   });
   assert.equal(doc.paid, true);
@@ -102,6 +102,14 @@ test("Billingo: magánszemély / cég / külföldi vevő és bruttó óradíjas 
   assert.equal(doc.items[0].quantity, 1.5);
   assert.equal(doc.items[0].unit_price_type, "gross");
   assert.equal("bank_account_id" in doc, false);
+  // teszt üzemmód: díjbekérő, „fizetve” jelölés nélkül
+  const proforma = documentPayload({
+    type: "proforma", partnerId: 1, blockId: 3, bankAccountId: null, vat: "TAM", language: "hu", date: "2026-11-10",
+    lines: [{ name: "Teremhasználat", grossPrice: 4000, hours: 1 }], comment: "",
+  });
+  assert.equal(proforma.type, "proforma");
+  assert.equal("paid" in proforma, false);
+  assert.equal(proforma.items[0].vat, "TAM");
 });
 
 const slots = [

@@ -216,7 +216,9 @@ const paymentSettingsSchema = z.object({
   vat: z.enum(VAT_OPTIONS),
   billingoBlockId: z.number().int().positive().nullable(),
   billingoBankAccountId: z.number().int().positive().nullable(),
+  billingoProformaBlockId: z.number().int().positive().nullable(),
   itemName: bilingual(120, "Számlatétel megnevezése"),
+  invoiceComment: bilingual(1000, "Megjegyzés a számlán"),
   access: z.object({ astoria: bilingual(4000, "Bejutási infók (Astoria)"), opera: bilingual(4000, "Bejutási infók (Opera)") }),
 });
 

@@ -5,7 +5,9 @@
     deadlineEnabled  — legyen-e fizetési határidő (lejáratkor az időpontok felszabadulnak)
     deadlineHours    — a határidő a jóváhagyástól számítva (legkésőbb az első időpont előtt 2 órával)
     vat              — a számla ÁFA-kulcsa a Billingóban (pl. "27%", "AAM")
-    billingo*        — melyik számlatömbbe / bankszámlára menjen a számla
+    billingo*        — melyik számlatömbbe / bankszámlára menjen a számla; teszt üzemmódban
+                       (Stripe sandbox kulcs) díjbekérő készül a díjbekérő tömbbe — ez nem megy a NAV-hoz
+    invoiceComment   — megjegyzés a számlán (pl. a tárgyi adómentesség jogcíme)
     itemName         — a számlatétel megnevezésének eleje (utána: terem, dátum, időpont)
     access           — a bejutási infók szövege stúdiónként, magyarul és angolul
 */
@@ -27,7 +29,10 @@ export interface PaymentSettings {
   vat: string;
   billingoBlockId: number | null;
   billingoBankAccountId: number | null;
+  /** Teszt üzemmódban (Stripe sandbox) ebbe a tömbbe készül díjbekérő; ha üres, a számlatömbbe. */
+  billingoProformaBlockId: number | null;
   itemName: Bilingual;
+  invoiceComment: Bilingual;
   access: Record<Studio, Bilingual>;
 }
 
@@ -40,7 +45,9 @@ export const defaultPaymentSettings: PaymentSettings = {
   vat: "27%",
   billingoBlockId: null,
   billingoBankAccountId: null,
+  billingoProformaBlockId: null,
   itemName: { hu: "Teremhasználat", en: "Studio rental" },
+  invoiceComment: { hu: "", en: "" },
   access: {
     astoria: { hu: "", en: "" },
     opera: { hu: "", en: "" },
@@ -72,7 +79,9 @@ export function normalizePaymentSettings(raw: unknown): PaymentSettings {
     vat: str(r.vat, d.vat) || d.vat,
     billingoBlockId: id(r.billingoBlockId),
     billingoBankAccountId: id(r.billingoBankAccountId),
+    billingoProformaBlockId: id(r.billingoProformaBlockId),
     itemName: bilingual(r.itemName, d.itemName),
+    invoiceComment: bilingual(r.invoiceComment, d.invoiceComment),
     access: Object.fromEntries(STUDIOS.map((s) => [s, bilingual(access[s], d.access[s])])) as Record<Studio, Bilingual>,
   };
 }

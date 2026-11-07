@@ -64,7 +64,10 @@ export function partnerPayload(billing: BillingAddress) {
   };
 }
 
+export type BillingoDocumentType = "invoice" | "proforma";
+
 export function documentPayload(input: {
+  type: BillingoDocumentType;
   partnerId: number;
   blockId: number;
   bankAccountId: number | null;
@@ -78,14 +81,15 @@ export function documentPayload(input: {
     partner_id: input.partnerId,
     block_id: input.blockId,
     ...(input.bankAccountId ? { bank_account_id: input.bankAccountId } : {}),
-    type: "invoice",
+    // proforma = díjbekérő: nem adóügyi bizonylat, nem megy a NAV-hoz (teszteléshez)
+    type: input.type,
     fulfillment_date: input.date,
     due_date: input.date,
     payment_method: "online_bankcard",
     language: input.language,
     currency: "HUF",
     electronic: false,
-    paid: true,
+    ...(input.type === "invoice" ? { paid: true } : {}),
     comment: input.comment,
     items: input.lines.map((line) => ({
       name: line.name.slice(0, 250),
@@ -99,6 +103,7 @@ export function documentPayload(input: {
 }
 
 export async function createInvoice(input: {
+  type: BillingoDocumentType;
   billing: BillingAddress;
   blockId: number;
   bankAccountId: number | null;

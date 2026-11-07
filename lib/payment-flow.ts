@@ -8,7 +8,7 @@ import type { Locale } from "./i18n.ts";
 import { studioOf, STUDIO_NAMES, type PaymentSettings } from "./payment-settings.ts";
 import { loadPaymentSettings } from "./payment-settings-store.ts";
 import { checkoutExpiry, computeDue, firstStart, paymentToken, reminderDue } from "./payment-rules.ts";
-import { createCheckoutSession, expireCheckoutSession, retrieveCheckoutSession, stripeConfigured, type CheckoutSession } from "./stripe.ts";
+import { createCheckoutSession, expireCheckoutSession, retrieveCheckoutSession, stripeConfigured, stripeTestMode, type CheckoutSession } from "./stripe.ts";
 import { billingoConfigured, createInvoice, sendInvoice, type BillingAddress } from "./billingo.ts";
 import { mailConfigured, sendMail, studioRecipient, studioReplyTo } from "./mailer.ts";
 import {
@@ -398,7 +398,10 @@ export async function runPostPayment(requestId: string): Promise<void> {
   const stale = r.invoice_status === "pending" && r.invoice_claimed_at && Date.parse(r.invoice_claimed_at) < Date.now() - 10 * 60_000;
   const retry = r.invoice_status === "error" && r.invoice_attempts < 5;
   if (r.invoice_status === null || stale || retry) {
-    if (!billingoConfigured() || !settings.billingoBlockId) {
+    // teszt üzemmódban (Stripe sandbox kulcs) számla helyett díjbekérő készül — az nem megy a NAV-hoz
+    const testMode = stripeTestMode();
+    const blockId = testMode ? settings.billingoProformaBlockId ?? settings.billingoBlockId : settings.billingoBlockId;
+    if (!billingoConfigured() || !blockId) {
       await update(r.id, { invoice_status: "skipped", invoice_error: "A Billingo nincs beállítva — a számlát kézzel kell kiállítani." });
     } else if (await claim(r.id, { invoice_status: r.invoice_status === null ? "is.null" : `eq.${r.invoice_status}` }, {
       invoice_status: "pending", invoice_claimed_at: nowIso(),
@@ -410,9 +413,11 @@ export async function runPostPayment(requestId: string): Promise<void> {
         const slots = approvedSlots(r);
         const itemName = (locale === "en" ? settings.itemName.en.trim() : "") || settings.itemName.hu;
         const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Budapest" }).format(new Date(r.paid_at ?? Date.now()));
+        const extraComment = ((locale === "en" ? settings.invoiceComment.en.trim() : "") || settings.invoiceComment.hu).trim();
         const invoice = await createInvoice({
+          type: testMode ? "proforma" : "invoice",
           billing: { ...r.billing, email: r.billing.email || r.customer.email },
-          blockId: settings.billingoBlockId,
+          blockId,
           bankAccountId: settings.billingoBankAccountId,
           vat: settings.vat,
           language: locale,
@@ -422,9 +427,16 @@ export async function runPostPayment(requestId: string): Promise<void> {
             grossPrice: s.price,
             hours: s.duration_minutes / 60,
           })),
-          comment: locale === "en" ? "Paid online by card (Stripe)." : "Online, bankkártyával fizetve (Stripe).",
+          comment: [
+            testMode ? "TESZT — díjbekérő, nem számla." : "",
+            locale === "en" ? "Paid online by card (Stripe)." : "Online, bankkártyával fizetve (Stripe).",
+            extraComment,
+          ].filter(Boolean).join("\n"),
         });
-        await update(r.id, { invoice_status: "issued", invoice_id: String(invoice.id), invoice_number: invoice.number, invoice_error: null });
+        await update(r.id, {
+          invoice_status: "issued", invoice_id: String(invoice.id), invoice_error: null,
+          invoice_number: testMode ? `Teszt díjbekérő ${invoice.number ?? `#${invoice.id}`}` : invoice.number,
+        });
         try {
           await sendInvoice(invoice.id, r.billing.email || r.customer.email);
         } catch (err) {

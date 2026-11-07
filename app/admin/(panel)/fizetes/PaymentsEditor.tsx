@@ -75,7 +75,7 @@ export default function PaymentsEditor({ initial, info, loadError, status }: {
     }
   }
 
-  const idSelect = (key: "billingoBlockId" | "billingoBankAccountId", list: BillingoOption[] | undefined, emptyLabel: string) => (
+  const idSelect = (key: "billingoBlockId" | "billingoBankAccountId" | "billingoProformaBlockId", list: BillingoOption[] | undefined, emptyLabel: string) => (
     list ? (
       <select id={key} className={inputCls} value={draft[key] ?? ""}
         onChange={(e) => set(key, e.target.value ? Number(e.target.value) : null)}>
@@ -140,12 +140,15 @@ export default function PaymentsEditor({ initial, info, loadError, status }: {
             <Field label="Bankszámla (nem kötelező)" htmlFor="billingoBankAccountId">
               {idSelect("billingoBankAccountId", options?.bankAccounts, "— a Billingo alapértelmezése —")}
             </Field>
-            <Field label="ÁFA" htmlFor="vat" hint="A könyvelő tudja: alanyi adómentes (AAM) vagy 27%.">
+            <Field label="Díjbekérő tömb (teszteléshez)" htmlFor="billingoProformaBlockId"
+              hint="Amíg a Stripe sandbox (teszt) kulccsal megy, számla helyett díjbekérő készül ebbe a tömbbe — az nem adóügyi bizonylat, nem megy a NAV-hoz. Ha üres, a fenti számlatömböt használja.">
+              {idSelect("billingoProformaBlockId", options?.blocks, "— a számlatömb —")}
+            </Field>
+            <Field label="ÁFA" htmlFor="vat" hint="A könyvelő tudja: tárgyi adómentes (TAM), alanyi adómentes (AAM) vagy 27%.">
               <select id="vat" className={inputCls} value={draft.vat} onChange={(e) => set("vat", e.target.value)}>
                 {VAT_OPTIONS.map((v) => <option key={v} value={v}>{vatLabels[v] ?? v}</option>)}
               </select>
             </Field>
-            <div />
             <Field label="Tétel megnevezése" htmlFor="itemName-hu" hint="Utána jön a terem, a dátum és az időpont, pl. „Teremhasználat – Astoria · Nagy Terem, 2026-11-20 14:00–16:00”.">
               <input id="itemName-hu" className={inputCls} value={draft.itemName.hu} onChange={(e) => set("itemName", { ...draft.itemName, hu: e.target.value })} />
             </Field>
@@ -154,6 +157,23 @@ export default function PaymentsEditor({ initial, info, loadError, status }: {
                 onChange={(e) => set("itemName", { ...draft.itemName, en: e.target.value })} />
             </Field>
           </div>
+          <div className="mt-5 grid gap-5 md:grid-cols-2">
+            <Field label="Megjegyzés a számlán" htmlFor="invoiceComment-hu" hint="Pl. a tárgyi adómentesség jogcíme (a pontos szöveget a könyvelő adja meg).">
+              <textarea id="invoiceComment-hu" rows={3} className={textareaCls} value={draft.invoiceComment.hu}
+                placeholder="Pl. Az Áfa tv. 86. § (1) bekezdés l) pontja alapján tárgyi adómentes."
+                onChange={(e) => set("invoiceComment", { ...draft.invoiceComment, hu: e.target.value })} />
+            </Field>
+            <Field label="Megjegyzés angol számlán" htmlFor="invoiceComment-en" hint="Ha üres, a magyar megy.">
+              <textarea id="invoiceComment-en" rows={3} className={textareaCls} value={draft.invoiceComment.en} placeholder={draft.invoiceComment.hu}
+                onChange={(e) => set("invoiceComment", { ...draft.invoiceComment, en: e.target.value })} />
+            </Field>
+          </div>
+          {status.stripe === "test" && (
+            <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
+              Teszt üzemmód (Stripe sandbox kulcs): fizetés után számla helyett díjbekérő készül a Billingóban, ami nem megy a NAV-hoz.
+              Az éles (sk_live_) kulccsal automatikusan valódi számla készül.
+            </p>
+          )}
           {optionsError && <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-800">{optionsError}</p>}
         </Card>
 
