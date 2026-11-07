@@ -18,7 +18,8 @@ import { endHour, formatBookingHour } from "@/lib/studio-booking";
 import { syncCalendar } from "@/lib/google-calendar";
 import { PAYMENT_SETTINGS_KEY, VAT_OPTIONS } from "@/lib/payment-settings";
 import { billingoConfigured, listBillingoOptions, type BillingoOption } from "@/lib/billingo";
-import { markPaidManually } from "@/lib/payment-flow";
+import { markPaidManually, notifyDecisionIfComplete, runInBackground } from "@/lib/payment-flow";
+import { scheduleCalendarSync } from "@/lib/calendar-schedule";
 
 /*
   Az admin felület (Termek, Adminok) írási műveletei. Mindegyik:
@@ -242,6 +243,36 @@ export async function loadBillingoOptions(): Promise<
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "A Billingo adatai nem tölthetők be." };
   }
+}
+
+/**
+ * Döntés az adminból (ugyanaz, mint a stúdiónak küldött e-mail gombjai): egy időpont
+ * jóváhagyása / elutasítása, vagy az igény összes függő időpontjának jóváhagyása.
+ * Ha az igény minden időpontjáról döntöttek, az ügyfél megkapja az e-mailt (fizetési linkkel).
+ */
+export async function decideBooking(slotIdInput: string, actionInput: string): Promise<ActionResult> {
+  return run(async () => {
+    const slotId = z.string().uuid("Érvénytelen foglalás.").parse(slotIdInput);
+    const action = z.enum(["approve", "reject", "approve-all"]).parse(actionInput);
+    const rows = await bookingStore<Array<{ request_id: string; studio_requests: { token_hash: string } | null }>>(
+      `studio_slots?select=request_id,studio_requests(token_hash)&id=eq.${slotId}`,
+    );
+    const row = rows[0];
+    if (!row?.studio_requests) return fail("A foglalás nem található. Frissítsd a naptárt.");
+    // a döntési függvény a token hash-ével azonosítja az igényt (ugyanaz a zárolás, mint az e-mailes döntésnél)
+    const result = await bookingStore<{ changed: number } | null>("rpc/decide_studio_request", {
+      method: "POST",
+      body: { p_token_hash: row.studio_requests.token_hash, p_action: action, p_slot_id: action === "approve-all" ? null : slotId },
+    });
+    if (!result?.changed) return fail("Erről az időpontról már döntöttek. Frissítsd a naptárt.");
+    if (action !== "reject") scheduleCalendarSync();
+    const requestId = row.request_id;
+    runInBackground("decision email", () => notifyDecisionIfComplete(requestId));
+    return {
+      ok: true,
+      message: action === "reject" ? "Elutasítva." : action === "approve-all" ? `Jóváhagyva (${result.changed} időpont).` : "Jóváhagyva.",
+    };
+  });
 }
 
 /** „Fizetettnek jelölöm” (pl. átutalás / készpénz) — nincs automatikus számla és bejutási e-mail. */

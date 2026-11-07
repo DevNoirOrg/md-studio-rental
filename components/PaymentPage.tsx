@@ -3,7 +3,7 @@ import SiteFooter from "@/components/SiteFooter";
 import { withBase } from "@/lib/base-path";
 import type { Locale } from "@/lib/i18n";
 import { verifyPaymentToken } from "@/lib/payment-rules";
-import { amountOf, approvedSlots, loadRequest, schedulePaymentJobs, toEmailSlots } from "@/lib/payment-flow";
+import { amountOf, approvedSlots, loadRequest, reconcileCheckout, schedulePaymentJobs, toEmailSlots } from "@/lib/payment-flow";
 import { formatDay, formatDeadline, formatMoney } from "@/lib/customer-emails";
 import { formatBookingHour } from "@/lib/studio-booking";
 import { loadRoomsConfig } from "@/lib/rooms-store";
@@ -71,12 +71,20 @@ const texts = {
 export default async function PaymentPage({ locale, variant, searchParams }: {
   locale: Locale;
   variant: "pay" | "success";
-  searchParams: { r?: string; t?: string; hiba?: string };
+  searchParams: { r?: string; t?: string; hiba?: string; session_id?: string };
 }) {
   const t = texts[locale];
   const id = searchParams.r ?? "";
   const token = searchParams.t ?? "";
-  const request = verifyPaymentToken(id, token) ? await loadRequest(id).catch(() => null) : null;
+  let request = verifyPaymentToken(id, token) ? await loadRequest(id).catch(() => null) : null;
+  // visszatérés a Stripe-ról: a fizetést közvetlenül ellenőrizzük (nem várunk a webhookra)
+  if (variant === "success" && request?.payment_status === "awaiting") {
+    try {
+      if (await reconcileCheckout(request, searchParams.session_id)) request = await loadRequest(id);
+    } catch (err) {
+      console.error("Checkout check on success page failed.", { message: (err as Error).message });
+    }
+  }
   schedulePaymentJobs();
   let config = defaultRoomsConfig;
   try {

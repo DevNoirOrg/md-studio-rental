@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { endHour, formatBookingHour, type AdminSlot, type LessonType } from "@/lib/studio-booking";
 import { withBase } from "@/lib/base-path";
-import { markRequestPaid } from "@/app/admin/panel-actions";
+import { decideBooking, markRequestPaid } from "@/app/admin/panel-actions";
 
 const lessonNames: Record<LessonType, string> = { privat: "Privát óra", kiscsoportos: "Kiscsoportos óra", csoportos: "Csoportos óra" };
 const currency = new Intl.NumberFormat("hu-HU", { style: "currency", currency: "HUF", maximumFractionDigits: 0 });
@@ -40,6 +40,29 @@ export default function BookingDetails({ booking, onClose, onDeleted, onStartRes
   const [marking, setMarking] = useState(false);
   const [confirmPaid, setConfirmPaid] = useState(false);
   const [paidMessage, setPaidMessage] = useState("");
+  const [deciding, setDeciding] = useState(false);
+  const [confirmReject, setConfirmReject] = useState(false);
+  async function decide(action: "approve" | "reject" | "approve-all") {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setDeciding(true);
+    setError("");
+    try {
+      const result = await decideBooking(booking.id, action);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setConfirmReject(false);
+      setPaidMessage(result.message ?? "Mentve.");
+      onUpdated?.();
+    } catch {
+      setError("A döntés mentése nem ellenőrizhető. Frissítsd a naptárt, mielőtt újrapróbálod.");
+    } finally {
+      busyRef.current = false;
+      setDeciding(false);
+    }
+  }
   async function markPaid() {
     if (!booking.payment || busyRef.current) return;
     busyRef.current = true;
@@ -125,6 +148,32 @@ export default function BookingDetails({ booking, onClose, onDeleted, onStartRes
         </button>
       </div>
       <span className={`inline-block rounded-lg px-3 py-2 text-sm font-bold ${statusOf(booking).cls}`}>{statusOf(booking).label}</span>
+      {booking.status === "pending" && (
+        <section aria-label="Döntés" className="mt-5 space-y-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm">
+          <p className="text-amber-900">Ha az igény minden időpontjáról döntöttél, az ügyfél e-mailt kap (elfogadásnál a fizetési linkkel).</p>
+          {confirmReject ? (
+            <div className="rounded-xl border border-red-200 bg-white p-3">
+              <p className="font-bold text-red-900">Biztosan elutasítod ezt az időpontot?</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button type="button" disabled={deciding} onClick={() => decide("reject")}
+                  className="rounded-lg bg-red-600 px-3 py-2 font-bold text-white hover:bg-red-700 disabled:opacity-50">{deciding ? "Mentés…" : "Igen, elutasítom"}</button>
+                <button type="button" disabled={deciding} onClick={() => setConfirmReject(false)} className="rounded-lg bg-gray-100 px-3 py-2 font-bold">Mégse</button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              <button type="button" disabled={deciding} onClick={() => decide("approve")}
+                className="rounded-xl bg-[#40CFD5] px-4 py-2.5 font-bold hover:bg-[#38bbc1] disabled:opacity-50">{deciding ? "Mentés…" : "Jóváhagyás"}</button>
+              <button type="button" disabled={deciding} onClick={() => setConfirmReject(true)}
+                className="rounded-xl border-2 border-red-200 bg-white px-4 py-2 font-bold text-red-700 hover:border-red-400 disabled:opacity-50">Elutasítás</button>
+            </div>
+          )}
+          {!confirmReject && (
+            <button type="button" disabled={deciding} onClick={() => decide("approve-all")}
+              className="font-bold text-[#087c81] underline underline-offset-2 disabled:opacity-50">Az igény összes függő időpontjának jóváhagyása</button>
+          )}
+        </section>
+      )}
       {booking.status === "approved" && booking.payment && (
         <section aria-label="Fizetés" className="mt-5 space-y-2 rounded-2xl bg-gray-50 p-4 text-sm">
           {booking.payment.status === "awaiting" && (

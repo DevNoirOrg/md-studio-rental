@@ -293,7 +293,8 @@ export async function startCheckout(r: RequestRow): Promise<CheckoutResult> {
         name: `${roomLabel(config, s.room)} – ${formatDay(s.date, locale)}, ${formatBookingHour(Number(s.hour))}–${formatBookingHour(Number(s.hour) + s.duration_minutes / 60)}`,
         amountHuf: s.price,
       })),
-      successUrl: `${base}/${locale === "en" ? "success" : "sikeres"}?${query}`,
+      // a {CHECKOUT_SESSION_ID} helyére a Stripe beírja a fizetés azonosítóját → a köszönő oldal ellenőrizni tudja
+      successUrl: `${base}/${locale === "en" ? "success" : "sikeres"}?${query}&session_id={CHECKOUT_SESSION_ID}`,
       cancelUrl: `${base}?${query}`,
       expiresAt,
       idempotencyKey: `${r.id}-${amount}-${Math.floor(now / 60_000)}`,
@@ -323,6 +324,22 @@ export function billingFromSession(session: CheckoutSession): BillingAddress | n
     address: [a?.line1, a?.line2].filter(Boolean).join(" "),
     taxNumber: d.tax_ids?.[0]?.value ?? undefined,
   };
+}
+
+/**
+ * A fizetés ellenőrzése közvetlenül a Stripe-nál (a webhook mellett, biztonsági hálóként):
+ * a köszönő oldal és az időzített teendők hívják. Ha a Stripe szerint ki van fizetve,
+ * ugyanúgy feldolgozza, mintha a webhook jelezte volna (kétszer nem fut le).
+ */
+export async function reconcileCheckout(r: RequestRow, sessionId?: string | null): Promise<boolean> {
+  if (r.payment_status !== "awaiting" || !stripeConfigured()) return false;
+  const id = sessionId && /^cs_[A-Za-z0-9_]+$/.test(sessionId) ? sessionId : r.stripe_session_id;
+  if (!id) return false;
+  const session = await retrieveCheckoutSession(id);
+  const ref = session.client_reference_id || session.metadata?.request_id;
+  if (ref !== r.id || session.payment_status !== "paid") return false;
+  await handleCheckoutCompleted(session);
+  return true;
 }
 
 export async function handleCheckoutCompleted(session: CheckoutSession): Promise<void> {
@@ -491,6 +508,19 @@ export async function runPaymentJobs(): Promise<{ expired: number; reminded: num
       } catch (err) {
         console.error("Payment reminder failed.", { requestId: r.id, message: (err as Error).message });
       }
+    }
+  }
+
+  // fizetésre váró igények, amelyekhez már nyílt Stripe fizetési oldal: ha a webhook nem jött meg, itt pótoljuk
+  const opened = await bookingStore<RequestRow[]>(
+    `studio_requests?select=${REQUEST_SELECT}&payment_status=eq.awaiting&stripe_session_id=not.is.null` +
+    `&stripe_session_expires_at=gte.${encodeURIComponent(new Date(now - 86_400_000).toISOString())}&limit=20`,
+  );
+  for (const r of opened) {
+    try {
+      if (await reconcileCheckout(r)) result.retried++;
+    } catch (err) {
+      console.error("Checkout reconciliation failed.", { requestId: r.id, message: (err as Error).message });
     }
   }
 
