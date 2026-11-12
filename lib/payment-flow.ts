@@ -5,14 +5,17 @@ import { loadRoomsConfig } from "./rooms-store.ts";
 import { defaultRoomsConfig, localizeRoomsConfig, roomLabel, type RoomsConfig } from "./room-config.ts";
 import type { Customer } from "./studio-booking.ts";
 import type { Locale } from "./i18n.ts";
-import { studioOf, STUDIO_NAMES, type PaymentSettings } from "./payment-settings.ts";
+import { codeFor, renderAccessText, studioOf, STUDIO_NAMES, type PaymentSettings, type Studio } from "./payment-settings.ts";
 import { loadPaymentSettings } from "./payment-settings-store.ts";
-import { checkoutExpiry, computeDue, firstStart, paymentToken, reminderDue } from "./payment-rules.ts";
+import {
+  ACCESS_REMINDER_BEFORE_MS, budapestInstant, checkoutExpiry, computeDue, firstStart, overdueNoticeAt, paymentToken, reminderDue,
+} from "./payment-rules.ts";
 import { createCheckoutSession, expireCheckoutSession, retrieveCheckoutSession, stripeConfigured, stripeTestMode, type CheckoutSession } from "./stripe.ts";
 import { billingoConfigured, createInvoice, sendInvoice, type BillingAddress } from "./billingo.ts";
 import { mailConfigured, sendMail, studioRecipient, studioReplyTo } from "./mailer.ts";
 import {
-  accessEmail, decisionEmail, expiredEmail, formatDay, receivedEmail, reminderEmail, studioNoticeEmail, type EmailSlot,
+  accessEmail, dayReminderEmail, decisionEmail, expiredEmail, formatDay, overdueEmail, receivedEmail, reminderEmail, studioNoticeEmail,
+  type EmailSlot,
 } from "./customer-emails.ts";
 import { formatBookingHour } from "./studio-booking.ts";
 import { scheduleCalendarSync } from "./calendar-schedule.ts";
@@ -24,10 +27,13 @@ import { scheduleCalendarSync } from "./calendar-schedule.ts";
     2) ha az igény minden időpontjáról döntöttek (notifyDecisionIfComplete):
          elfogadott időpont(ok) → „Elfogadtuk” e-mail fizetési linkkel (ha az online fizetés be van
          kapcsolva; ilyenkor payment_status = awaiting + határidő), minden elutasítva → „Elutasítva”
-    3) Stripe webhook (handleCheckoutCompleted) → fizetve → bejutási infók e-mail, Billingo számla
-       (a Billingo küldi), értesítő a stúdiónak (runPostPayment)
-    4) időzített teendők (runPaymentJobs): lejárt határidő → időpontok felszabadítása + e-mailek;
-       emlékeztető 12 órával a határidő előtt; a félbemaradt utófeladatok (számla, e-mail) újrapróbálása
+    3) Stripe webhook (handleCheckoutCompleted) → fizetve → visszaigazoló e-mail (a 24 órán belüli napok
+       bejutási infóival), Billingo számla (a Billingo küldi), értesítő a stúdiónak (runPostPayment)
+    4) időzített teendők (runPaymentJobs, óránként): lejárt határidő → időpontok felszabadítása + e-mailek;
+       emlékeztető 12 órával a határidő előtt; minden foglalási nap előtt 24 órával emlékeztető (fizetve:
+       bejutási infókkal, a hónap kódjával; nincs fizetve: fizetési linkkel); határidő nélküli, ki nem
+       fizetett foglalásnál az utolsó időpont utáni nap 10:00-kor „még nem rendezted” e-mail;
+       a félbemaradt utófeladatok (számla, e-mail) újrapróbálása
 
   Minden lépés „lefoglalja” magát egy feltételes adatbázis-frissítéssel (pl. csak ha még nincs
   elküldve), így ugyanaz az e-mail kétszer nem megy ki, akárhányszor fut le a folyamat.
@@ -37,7 +43,8 @@ export const REQUEST_SELECT = [
   "id", "customer", "lesson_type", "created_at", "decision_notified_at", "payment_status", "payment_due",
   "payment_reminded_at", "stripe_session_id", "stripe_session_expires_at", "stripe_payment_intent", "paid_at",
   "paid_via", "paid_amount", "billing", "invoice_status", "invoice_id", "invoice_number", "invoice_error",
-  "invoice_attempts", "invoice_claimed_at", "access_sent_at", "studio_paid_notified_at",
+  "invoice_attempts", "invoice_claimed_at", "access_sent_at", "studio_paid_notified_at", "access_reminders_enabled",
+  "payment_overdue_notified_at",
   "studio_slots(id,room,date,hour,duration_minutes,price,status)",
 ].join(",");
 
@@ -75,6 +82,8 @@ export interface RequestRow {
   invoice_claimed_at: string | null;
   access_sent_at: string | null;
   studio_paid_notified_at: string | null;
+  access_reminders_enabled: boolean;
+  payment_overdue_notified_at: string | null;
   studio_slots: SlotRow[];
 }
 
@@ -194,7 +203,7 @@ export async function notifyDecisionIfComplete(requestId: string): Promise<void>
       const start = firstStart(approved)!;
       const dueMs = computeDue(Date.now(), start, settings);
       due = dueMs ? new Date(dueMs).toISOString() : null;
-      await update(r.id, { payment_status: "awaiting", payment_due: due });
+      await update(r.id, { payment_status: "awaiting", payment_due: due, access_reminders_enabled: true });
       link = paymentUrl(r.id, locale);
       await refreshCalendar(r.id);
     }
@@ -224,35 +233,196 @@ export async function startAdminBookingFlow(requestId: string, options: { sendPa
   if (options.sendPaymentLink && paymentsActive(settings) && approved.length) {
     const dueMs = computeDue(Date.now(), firstStart(approved)!, settings);
     const due = dueMs ? new Date(dueMs).toISOString() : null;
-    if (!(await claim(r.id, { decision_notified_at: "is.null" }, { decision_notified_at: nowIso(), payment_status: "awaiting", payment_due: due }))) return;
+    if (!(await claim(r.id, { decision_notified_at: "is.null" }, {
+      decision_notified_at: nowIso(), payment_status: "awaiting", payment_due: due, access_reminders_enabled: true,
+    }))) return;
     await refreshCalendar(r.id);
     await mailCustomer(r, decisionEmail({
       locale, name: r.customer.name, approved: toEmailSlots(approved, config), rejected: [], paymentUrl: paymentUrl(r.id, locale), due,
     }));
     return;
   }
-  if (options.sendAccess) await sendAccessInfo(r, settings, { paid: false });
+  if (options.sendAccess) {
+    await update(r.id, { access_reminders_enabled: true });
+    await sendAccessInfo(r, settings, { paid: false });
+  }
 }
 
+// ---------------------------------------------------------------------
+//  Bejutási infók: a foglalási nap előtt 24 órával (havi kóddal)
+// ---------------------------------------------------------------------
+interface BookingDay {
+  day: string;
+  slots: SlotRow[];
+  startMs: number;
+  endMs: number;
+}
+
+/** Az igény elfogadott időpontjai foglalási naponként (a nap első kezdetével és utolsó végével). */
+export function bookingDays(slots: SlotRow[]): BookingDay[] {
+  const byDay = new Map<string, SlotRow[]>();
+  for (const s of sortSlots(slots)) byDay.set(s.date, [...(byDay.get(s.date) ?? []), s]);
+  return [...byDay].map(([day, list]) => ({
+    day,
+    slots: list,
+    startMs: Math.min(...list.map((s) => budapestInstant(s.date, Number(s.hour)))),
+    endMs: Math.max(...list.map((s) => budapestInstant(s.date, Number(s.hour)) + s.duration_minutes * 60_000)),
+  }));
+}
+
+/** A nap bejutási infói most esedékesek-e (24 órán belül kezdődik, és még nem ért véget). */
+const accessDueNow = (d: BookingDay, now: number) => d.startMs - now <= ACCESS_REMINDER_BEFORE_MS && d.endMs > now;
+
+/** Egy nap bejutási szövegei stúdiónként, a hónap kódjával; missing: a hiányzó kódú stúdiók. */
+function accessBlocksFor(settings: PaymentSettings, locale: Locale, d: BookingDay, labelDay: boolean) {
+  const studios = [...new Set(d.slots.map((s) => studioOf(s.room)))];
+  const missing: Studio[] = [];
+  const blocks = studios.map((studio) => {
+    const raw = (locale === "en" ? settings.access[studio].en.trim() : "") || settings.access[studio].hu;
+    const rendered = renderAccessText(raw, codeFor(settings, studio, d.day), locale);
+    if (rendered.missing) missing.push(studio);
+    return { studio: labelDay ? `${STUDIO_NAMES[studio]} – ${formatDay(d.day, locale)}` : STUDIO_NAMES[studio], text: rendered.text };
+  });
+  return { blocks, missing };
+}
+
+async function warnMissingCodes(r: RequestRow, d: BookingDay, missing: Studio[]): Promise<void> {
+  if (!missing.length) return;
+  const month = d.day.slice(0, 7);
+  await mailStudio("problem", r, d.slots,
+    `Hiányzik a(z) ${missing.map((s) => STUDIO_NAMES[s]).join(", ")} ${month} havi bejutási kódja. Az ügyfél a kód helyett „hamarosan külön küldjük” szöveget kapott — küldd el neki a kódot, és add meg az adminban (Fizetés és e-mailek → Havi kódok).`,
+  ).catch((err) => console.error("Missing code notice failed.", { message: (err as Error).message }));
+}
+
+type DayClaim = "inserted" | "upgraded" | null;
+
+/** Egy foglalási nap emlékeztetőjének „lefoglalása” (kétszer ne menjen ki); withAccess: a bejutási infókkal. */
+async function claimDay(requestId: string, day: string, withAccess: boolean): Promise<DayClaim> {
+  const inserted = await bookingStore<Array<{ day: string }>>("access_reminders?on_conflict=request_id,day&select=day", {
+    method: "POST", body: { request_id: requestId, day, with_access: withAccess },
+    returnRepresentation: true, prefer: "resolution=ignore-duplicates",
+  });
+  if (Array.isArray(inserted) && inserted.length) return "inserted";
+  if (!withAccess) return null;
+  // korábban fizetési linkes (kód nélküli) emlékeztető ment → most mehetnek a bejutási infók
+  const upgraded = await bookingStore<Array<{ day: string }>>(
+    `access_reminders?request_id=eq.${requestId}&day=eq.${day}&with_access=is.false&select=day`,
+    { method: "PATCH", body: { with_access: true, sent_at: nowIso() }, returnRepresentation: true },
+  );
+  return Array.isArray(upgraded) && upgraded.length ? "upgraded" : null;
+}
+
+async function releaseDay(requestId: string, day: string, claimed: DayClaim): Promise<void> {
+  if (claimed === "inserted") await bookingStore(`access_reminders?request_id=eq.${requestId}&day=eq.${day}`, { method: "DELETE" }).catch(() => {});
+  if (claimed === "upgraded") await bookingStore(`access_reminders?request_id=eq.${requestId}&day=eq.${day}`, { method: "PATCH", body: { with_access: false } }).catch(() => {});
+}
+
+/**
+ * Visszaigazoló e-mail (fizetés után, vagy az admin „bejutási infók küldése”): a 24 órán belüli
+ * napok bejutási infóival; a későbbi napokét az időpont előtt 24 órával küldjük (runPaymentJobs).
+ */
 async function sendAccessInfo(r: RequestRow, settings: PaymentSettings, { paid }: { paid: boolean }): Promise<void> {
   if (!(await claim(r.id, { access_sent_at: "is.null" }, { access_sent_at: nowIso() }))) return;
+  const claimed: Array<{ day: string; claim: DayClaim }> = [];
   try {
+    const now = Date.now();
     const locale = requestLocale(r);
     const slots = approvedSlots(r);
+    const days = bookingDays(slots);
+    const soon = days.filter((d) => accessDueNow(d, now));
+    const blocks: Array<{ studio: string; text: string }> = [];
+    const warnings: Array<{ d: BookingDay; missing: Studio[] }> = [];
+    for (const d of soon) {
+      const c = await claimDay(r.id, d.day, true);
+      if (!c) continue; // ennek a napnak a bejutási infói már kimentek
+      claimed.push({ day: d.day, claim: c });
+      const rendered = accessBlocksFor(settings, locale, d, soon.length > 1);
+      blocks.push(...rendered.blocks);
+      warnings.push({ d, missing: rendered.missing });
+    }
     const config = await roomsFor(locale);
-    const studios = [...new Set(slots.map((s) => studioOf(s.room)))];
-    const access = studios.map((s) => ({
-      studio: STUDIO_NAMES[s],
-      text: (locale === "en" ? settings.access[s].en.trim() : "") || settings.access[s].hu,
-    }));
     await mailCustomer(r, accessEmail({
-      locale, name: r.customer.name, slots: toEmailSlots(slots, config), access, paid,
+      locale, name: r.customer.name, slots: toEmailSlots(slots, config), access: blocks, paid,
       invoiceByEmail: paid && billingoConfigured() && !!settings.billingoBlockId,
+      laterNote: days.some((d) => d.startMs - now > ACCESS_REMINDER_BEFORE_MS),
     }));
+    for (const w of warnings) await warnMissingCodes(r, w.d, w.missing);
   } catch (err) {
     await update(r.id, { access_sent_at: null }).catch(() => {});
+    for (const c of claimed) await releaseDay(r.id, c.day, c.claim);
     throw err;
   }
+}
+
+/** Emlékeztetők a foglalási napok előtt 24 órával: fizetve → bejutási infókkal, nincs fizetve → fizetési linkkel. */
+async function runDayReminders(settings: PaymentSettings, now: number): Promise<number> {
+  const from = new Date(now - 86_400_000).toISOString().slice(0, 10);
+  const to = new Date(now + 2 * 86_400_000).toISOString().slice(0, 10);
+  const upcoming = await bookingStore<Array<{ request_id: string }>>(
+    `studio_slots?select=request_id&status=eq.approved&date=gte.${from}&date=lte.${to}&limit=500`,
+  );
+  const ids = [...new Set(upcoming.map((s) => s.request_id).filter(Boolean))];
+  if (!ids.length) return 0;
+  let sent = 0;
+  for (let i = 0; i < ids.length; i += 50) {
+    const requests = await bookingStore<RequestRow[]>(
+      `studio_requests?select=${REQUEST_SELECT}&access_reminders_enabled=is.true&id=in.(${ids.slice(i, i + 50).join(",")})`,
+    );
+    for (const r of requests) {
+      if (r.payment_status === "expired") continue;
+      const withAccess = r.payment_status === "paid" || r.payment_status === null;
+      const days = bookingDays(approvedSlots(r)).filter((d) => accessDueNow(d, now));
+      for (const d of days) {
+        // fizetési linkes emlékeztető ne menjen közvetlenül a (fizetési linket tartalmazó) jóváhagyó e-mail után
+        if (!withAccess && (!r.decision_notified_at || Date.parse(r.decision_notified_at) > d.startMs - ACCESS_REMINDER_BEFORE_MS)) continue;
+        let c: DayClaim = null;
+        try {
+          c = await claimDay(r.id, d.day, withAccess);
+          if (!c) continue;
+          const locale = requestLocale(r);
+          const config = await roomsFor(locale);
+          const rendered = withAccess ? accessBlocksFor(settings, locale, d, false) : null;
+          await mailCustomer(r, dayReminderEmail({
+            locale, name: r.customer.name, slots: toEmailSlots(d.slots, config),
+            access: rendered?.blocks ?? null, paymentUrl: withAccess ? null : paymentUrl(r.id, locale),
+          }));
+          sent++;
+          if (rendered) await warnMissingCodes(r, d, rendered.missing);
+        } catch (err) {
+          await releaseDay(r.id, d.day, c);
+          console.error("Day reminder failed.", { requestId: r.id, day: d.day, message: (err as Error).message });
+        }
+      }
+    }
+  }
+  return sent;
+}
+
+/** Határidő nélküli, ki nem fizetett foglalás: az utolsó időpont utáni napon 10:00-kor egy „még nem rendezted” e-mail. */
+async function runOverdueNotices(now: number): Promise<number> {
+  const rows = await bookingStore<RequestRow[]>(
+    `studio_requests?select=${REQUEST_SELECT}&payment_status=eq.awaiting&payment_due=is.null&payment_overdue_notified_at=is.null&limit=200`,
+  );
+  let sent = 0;
+  for (const r of rows) {
+    const slots = approvedSlots(r);
+    if (!slots.length || now < overdueNoticeAt(slots[slots.length - 1].date)) continue;
+    try {
+      if (!(await claim(r.id, { payment_overdue_notified_at: "is.null", payment_status: "eq.awaiting" }, { payment_overdue_notified_at: nowIso() }))) continue;
+      const locale = requestLocale(r);
+      const config = await roomsFor(locale);
+      try {
+        await mailCustomer(r, overdueEmail({ locale, name: r.customer.name, slots: toEmailSlots(slots, config), paymentUrl: paymentUrl(r.id, locale) }));
+      } catch (err) {
+        await update(r.id, { payment_overdue_notified_at: null }).catch(() => {});
+        throw err;
+      }
+      sent++;
+    } catch (err) {
+      console.error("Overdue notice failed.", { requestId: r.id, message: (err as Error).message });
+    }
+  }
+  return sent;
 }
 
 // ---------------------------------------------------------------------
@@ -278,7 +448,7 @@ export async function startCheckout(r: RequestRow): Promise<CheckoutResult> {
       console.error("Existing checkout session lookup failed.", { message: (err as Error).message });
     }
   }
-  const expiresAt = checkoutExpiry(now, dueMs ?? firstStart(slots)!);
+  const expiresAt = checkoutExpiry(now, dueMs ?? Number.POSITIVE_INFINITY);
   if (!expiresAt) return { error: "too-late" };
   const locale = requestLocale(r);
   const config = await roomsFor(locale);
@@ -468,11 +638,19 @@ export async function runPostPayment(requestId: string): Promise<void> {
 // ---------------------------------------------------------------------
 //  4) Időzített teendők: lejárat, emlékeztető, félbemaradt utófeladatok
 // ---------------------------------------------------------------------
-export async function runPaymentJobs(): Promise<{ expired: number; reminded: number; retried: number }> {
-  const result = { expired: 0, reminded: 0, retried: 0 };
-  if (!stripeConfigured()) return result;
+export async function runPaymentJobs(): Promise<{ expired: number; reminded: number; retried: number; dayReminders: number; overdue: number }> {
+  const result = { expired: 0, reminded: 0, retried: 0, dayReminders: 0, overdue: 0 };
+  if (!mailConfigured()) return result;
   const settings = await loadPaymentSettings();
   const now = Date.now();
+
+  // emlékeztetők a foglalási napok előtt 24 órával (bejutási infókkal / fizetési linkkel) — Stripe nélkül is
+  try {
+    result.dayReminders = await runDayReminders(settings, now);
+  } catch (err) {
+    console.error("Day reminders failed.", { message: (err as Error).message });
+  }
+  if (!stripeConfigured()) return result;
 
   if (settings.deadlineEnabled) {
     // lejárt határidő → az időpontok felszabadulnak
@@ -550,6 +728,13 @@ export async function runPaymentJobs(): Promise<{ expired: number; reminded: num
       console.error("Post-payment retry failed.", { requestId: id, message: (err as Error).message });
     }
   }
+
+  // „még nem rendezted” e-mail a határidő nélküli, ki nem fizetett foglalásokra (az időpont után)
+  try {
+    result.overdue = await runOverdueNotices(now);
+  } catch (err) {
+    console.error("Overdue notices failed.", { message: (err as Error).message });
+  }
   return result;
 }
 
@@ -557,7 +742,7 @@ let lastJobRun = 0;
 
 /** Az időzített teendők elindítása a válasz után — legfeljebb percenként egyszer (példányonként). */
 export function schedulePaymentJobs(): void {
-  if (!stripeConfigured() || Date.now() - lastJobRun < 60_000) return;
+  if (!mailConfigured() || Date.now() - lastJobRun < 60_000) return;
   lastJobRun = Date.now();
   runInBackground("payment jobs", runPaymentJobs);
 }

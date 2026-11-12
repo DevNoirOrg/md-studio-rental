@@ -24,8 +24,8 @@ const dateTime = (iso: string) =>
 /** A foglalás állapota a fizetéssel együtt: jóváhagyásra vár / fizetésre vár / fizetve / foglalás alatt. */
 function statusOf(booking: AdminSlot): { label: string; cls: string } {
   if (booking.status === "pending") return { label: "Jóváhagyásra vár", cls: "bg-amber-100 text-amber-900" };
-  if (booking.payment?.status === "awaiting") return { label: "Fizetésre vár", cls: "bg-violet-100 text-violet-900" };
-  if (booking.payment?.status === "paid") return { label: "Fizetve", cls: "bg-blue-100 text-blue-900" };
+  if (booking.payment?.status === "awaiting") return { label: "Jóváhagyva – nincs fizetve", cls: "bg-red-100 text-red-900" };
+  if (booking.payment?.status === "paid") return { label: "Fizetve", cls: "bg-emerald-100 text-emerald-900" };
   return { label: "Foglalás alatt", cls: "bg-blue-100 text-blue-900" };
 }
 

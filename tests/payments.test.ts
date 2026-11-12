@@ -2,13 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import {
-  budapestInstant, checkoutExpiry, computeDue, firstStart, paymentToken, reminderDue, verifyPaymentToken,
+  budapestInstant, checkoutExpiry, computeDue, firstStart, overdueNoticeAt, paymentToken, reminderDue, verifyPaymentToken,
 } from "../lib/payment-rules.ts";
 import { formEncode, verifyStripeSignature } from "../lib/stripe.ts";
-import { normalizePaymentSettings, studioOf, defaultPaymentSettings } from "../lib/payment-settings.ts";
+import {
+  codeFor, defaultPaymentSettings, hasCodePlaceholder, normalizePaymentSettings, renderAccessText, studioOf,
+} from "../lib/payment-settings.ts";
 import { documentPayload, partnerPayload } from "../lib/billingo.ts";
 import {
-  accessEmail, decisionEmail, expiredEmail, receivedEmail, reminderEmail, studioNoticeEmail,
+  accessEmail, dayReminderEmail, decisionEmail, expiredEmail, overdueEmail, receivedEmail, reminderEmail, studioNoticeEmail,
 } from "../lib/customer-emails.ts";
 
 const HOUR = 3_600_000;
@@ -20,15 +22,41 @@ test("budapesti idő → UTC (téli és nyári időszámítás)", () => {
   assert.equal(firstStart([]), null);
 });
 
-test("fizetési határidő: N óra, de legkésőbb 2 órával az első időpont előtt; kikapcsolva nincs", () => {
+test("fizetési határidő: közeli foglalásnál nincs, különben 24 óra (legkésőbb az időpontig); kikapcsolva nincs", () => {
   const now = Date.parse("2026-11-10T10:00:00Z");
-  const settings = { deadlineEnabled: true, deadlineHours: 48 };
-  assert.equal(computeDue(now, now + 10 * 24 * HOUR, settings), now + 48 * HOUR);
-  assert.equal(computeDue(now, now + 20 * HOUR, settings), now + 18 * HOUR);
-  // nagyon közeli időpont: legalább 1 óra jár a fizetésre, de nem az időpont kezdete után
-  assert.equal(computeDue(now, now + 2 * HOUR, settings), now + HOUR);
-  assert.equal(computeDue(now, now + 30 * 60_000, settings), now + 30 * 60_000);
-  assert.equal(computeDue(now, now + 10 * 24 * HOUR, { deadlineEnabled: false, deadlineHours: 48 }), null);
+  const settings = { deadlineEnabled: true, nearHours: 48, payWithinHours: 24 };
+  assert.equal(computeDue(now, now + 10 * 24 * HOUR, settings), now + 24 * HOUR);
+  assert.equal(computeDue(now, now + 49 * HOUR, settings), now + 24 * HOUR);
+  // 48 órán belül: nincs határidő, nem szabadul fel
+  assert.equal(computeDue(now, now + 48 * HOUR, settings), null);
+  assert.equal(computeDue(now, now + 2 * HOUR, settings), null);
+  // a fizetési idő nem nyúlhat az időpont kezdete utánra
+  assert.equal(computeDue(now, now + 30 * HOUR, { deadlineEnabled: true, nearHours: 12, payWithinHours: 48 }), now + 30 * HOUR);
+  assert.equal(computeDue(now, now + 10 * 24 * HOUR, { ...settings, deadlineEnabled: false }), null);
+});
+
+test("„még nem rendezted” e-mail: az utolsó időpont utáni nap 10:00 (Budapest)", () => {
+  assert.equal(new Date(overdueNoticeAt("2026-11-20")).toISOString(), "2026-11-21T09:00:00.000Z");
+  assert.equal(new Date(overdueNoticeAt("2026-07-31")).toISOString(), "2026-08-01T08:00:00.000Z");
+  assert.equal(new Date(overdueNoticeAt("2026-12-31")).toISOString(), "2027-01-01T09:00:00.000Z");
+});
+
+test("havi bejutási kód: a foglalás napjának hónapja szerint, hiányzó kódnál „hamarosan küldjük”", () => {
+  const settings = normalizePaymentSettings({
+    codes: { opera: [{ month: "2026-12", code: "5678" }, { month: "2026-11", code: " 1234 " }, { month: "rossz", code: "x" }] },
+  });
+  assert.deepEqual(settings.codes.opera.map((c) => c.month), ["2026-11", "2026-12"]);
+  assert.deepEqual(settings.codes.astoria, []);
+  assert.equal(codeFor(settings, "opera", "2026-11-30"), "1234");
+  assert.equal(codeFor(settings, "opera", "2026-12-01"), "5678");
+  assert.equal(codeFor(settings, "opera", "2027-01-05"), null);
+  assert.equal(codeFor(settings, "astoria", "2026-11-30"), null);
+
+  assert.deepEqual(renderAccessText("Kapukód: {KÓD}, majd {kód}#", "1234", "hu"), { text: "Kapukód: 1234, majd 1234#", missing: false });
+  assert.deepEqual(renderAccessText("Door code: {CODE}", null, "en"), { text: "Door code: (we'll send you the entry code separately shortly)", missing: true });
+  assert.deepEqual(renderAccessText("Csengess a 3-ason", null, "hu"), { text: "Csengess a 3-ason", missing: false });
+  assert.equal(hasCodePlaceholder("kód: { KOD }"), true);
+  assert.equal(hasCodePlaceholder("kód nélkül"), false);
 });
 
 test("Stripe fizetési oldal lejárata: 30 perc – 24 óra, nem a határidő után", () => {
@@ -36,6 +64,8 @@ test("Stripe fizetési oldal lejárata: 30 perc – 24 óra, nem a határidő ut
   assert.equal(checkoutExpiry(now, now + 72 * HOUR), Math.floor((now + 23.5 * HOUR) / 1000));
   assert.equal(checkoutExpiry(now, now + 5 * HOUR), Math.floor((now + 5 * HOUR) / 1000));
   assert.equal(checkoutExpiry(now, now + 20 * 60_000), null);
+  // határidő nélkül (közeli foglalás): az időpont után is lehet fizetni
+  assert.equal(checkoutExpiry(now, Number.POSITIVE_INFINITY), Math.floor((now + 23.5 * HOUR) / 1000));
 });
 
 test("emlékeztető: 12 órával a határidő előtt, csak ha elég hosszú volt a fizetési idő", () => {
@@ -78,9 +108,11 @@ test("Stripe form-kódolás beágyazott mezőkkel", () => {
 
 test("fizetési beállítások: hiányzó adat → alapérték, hibás érték kiszűrve", () => {
   assert.deepEqual(normalizePaymentSettings(undefined), defaultPaymentSettings);
-  const s = normalizePaymentSettings({ enabled: true, deadlineHours: 0, billingoBlockId: "12", access: { opera: { hu: "Kapukód: 1234" } } });
+  const s = normalizePaymentSettings({ enabled: true, deadlineHours: 72, nearHours: 0, payWithinHours: 12.4, billingoBlockId: "12", access: { opera: { hu: "Kapukód: 1234" } } });
   assert.equal(s.enabled, true);
-  assert.equal(s.deadlineHours, 1);
+  assert.equal(s.nearHours, 1);
+  assert.equal(s.payWithinHours, 12);
+  assert.equal("deadlineHours" in s, false);
   assert.equal(s.billingoBlockId, null);
   assert.equal(s.access.opera.hu, "Kapukód: 1234");
   assert.equal(s.access.astoria.hu, "");
@@ -144,6 +176,21 @@ test("ügyfél-e-mailek: magyarul és angolul, a dinamikus részekkel", () => {
   assert.ok(access.html.includes("Kapukód: 1234<br>2. emelet"));
   assert.ok(access.text.includes("A számlát külön e-mailben küldjük."));
   assert.ok(access.subject.startsWith("Sikeres fizetés"));
+  assert.ok(!access.text.includes("24 órával"));
+
+  // fizetés után, a későbbi napok bejutási infói 24 órával előtte mennek
+  const later = accessEmail({ locale: "hu", name: "Elek", slots, paid: true, invoiceByEmail: false, access: [], laterNote: true });
+  assert.ok(later.text.includes("A bejutási infókat az időpont előtt 24 órával e-mailben küldjük."));
+  assert.ok(!later.text.includes("BEJUTÁSI"));
+
+  // emlékeztető 24 órával előtte: fizetve → bejutási infók; nincs fizetve → fizetési link, kód nélkül
+  const paidDay = dayReminderEmail({ locale: "hu", name: "Elek", slots: [slots[1]], access: [{ studio: "Opera stúdió", text: "Kapukód: 1234" }], paymentUrl: null });
+  assert.ok(paidDay.text.includes("Kapukód: 1234"));
+  assert.ok(!paidDay.text.includes("Fizetés:"));
+  const unpaidDay = dayReminderEmail({ locale: "en", name: "Alex", slots: [slots[1]], access: null, paymentUrl: "https://x.test/p" });
+  assert.ok(unpaidDay.text.includes("Pay now: https://x.test/p"));
+  assert.ok(!/tomorrow/i.test(unpaidDay.subject));
+  assert.ok(overdueEmail({ locale: "hu", name: "Elek", slots, paymentUrl: "https://x.test/p" }).text.includes("Fizetés: https://x.test/p"));
 
   // a felhasználói adat nem kerülhet HTML-ként az e-mailbe
   const xss = receivedEmail({ locale: "hu", name: "<img src=x onerror=alert(1)>", slots, paymentsEnabled: true });

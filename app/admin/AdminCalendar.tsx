@@ -254,8 +254,9 @@ export default function AdminCalendar({ config, initialDate, initialRoom, paymen
         <span className="rounded bg-gray-200 px-2 py-1 text-gray-700">Elmúlt időpont</span>
         <span className="md-closed-slot rounded px-2 py-1 text-gray-700">Zárva</span>
         <span className="rounded bg-amber-100 px-2 py-1 text-amber-900">Jóváhagyásra vár</span>
-        <span className="rounded bg-violet-100 px-2 py-1 text-violet-900">Fizetésre vár</span>
-        <span className="rounded bg-blue-100 px-2 py-1 text-blue-900">Foglalás alatt / fizetve</span>
+        <span className="rounded bg-red-100 px-2 py-1 text-red-900">Jóváhagyva – nincs fizetve</span>
+        <span className="rounded bg-emerald-100 px-2 py-1 text-emerald-900">Fizetve</span>
+        <span className="rounded bg-blue-100 px-2 py-1 text-blue-900">Foglalás alatt (online fizetés nélkül)</span>
       </div>
       <div className="mb-5 min-h-5" aria-live="polite">
       {error ? (
@@ -278,11 +279,14 @@ export default function AdminCalendar({ config, initialDate, initialRoom, paymen
               const key = dateKey(day);
               const bookings = ready ? slots.filter((slot) => slot.room === room && slot.date === key) : [];
               const pending = bookings.filter((slot) => slot.status === "pending").length;
-              const approved = bookings.filter((slot) => slot.status === "approved").length;
+              const approvedList = bookings.filter((slot) => slot.status === "approved");
+              const unpaid = approvedList.filter((slot) => slot.paymentStatus === "awaiting").length;
+              const paid = approvedList.filter((slot) => slot.paymentStatus === "paid").length;
+              const approved = approvedList.length - unpaid - paid;
               const inMonth = day.getMonth() === selectedDate.getMonth();
               return (
                 <button key={key} type="button"
-                  aria-label={`${key}, ${pending} jóváhagyásra vár, ${approved} foglalás alatt; napi nézet megnyitása`}
+                  aria-label={`${key}, ${pending} jóváhagyásra vár, ${unpaid} nincs fizetve, ${paid} fizetve, ${approved} foglalás alatt; napi nézet megnyitása`}
                   onClick={() => { changeDate(key); changeView("day"); }}
                   className={`flex min-h-20 flex-col items-center justify-center gap-1 rounded-xl border p-1 text-sm focus-visible:ring-2 focus-visible:ring-[#40CFD5] ${
                     !inMonth ? "border-gray-100 bg-gray-50 text-gray-400" :
@@ -292,6 +296,8 @@ export default function AdminCalendar({ config, initialDate, initialRoom, paymen
                   {ready ? (
                     <span className="flex flex-wrap justify-center gap-1 text-[10px]">
                       {pending > 0 && <span className="rounded bg-amber-100 px-1 text-amber-900">{pending} vár</span>}
+                      {unpaid > 0 && <span className="rounded bg-red-100 px-1 text-red-900">{unpaid} nincs fiz.</span>}
+                      {paid > 0 && <span className="rounded bg-emerald-100 px-1 text-emerald-900">{paid} fizetve</span>}
                       {approved > 0 && <span className="rounded bg-blue-100 px-1 text-blue-900">{approved} alatt</span>}
                     </span>
                   ) : <span aria-hidden="true" className="text-xs">…</span>}

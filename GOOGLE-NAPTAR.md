@@ -83,8 +83,29 @@ foglalást nem töröl; hozzáadja a naptár-szinkron mezőit).
 Gyakori hiba: „A naptár nem érhető el (404/403)” → a naptár nincs megosztva a robot e-mail címével
 „Módosíthatja az eseményeket” joggal, vagy elírtad a naptárazonosítót.
 
-Ha korábban a régi (termenkénti) beállítást használtátok: a `GOOGLE_CALENDAR_ASTORIA_…` /
-`GOOGLE_CALENDAR_OPERA_…` változók törölhetők, helyettük a `GOOGLE_CALENDAR_ID` kell.
+## 6. Termenként külön naptár (ki-/bekapcsolhatók)
+
+Hogy a Google Naptárban termenként ki-be lehessen kapcsolni a foglalásokat, mind a négy teremnek lehet saját naptára.
+
+1. Az `info.mddancestudio@gmail.com` fiókkal a <https://calendar.google.com> oldalon bal oldalt
+   „Egyéb naptárak” **+ → Új naptár létrehozása**, négyszer: `Astoria Nagy`, `Astoria Kis`, `Opera Nagy`, `Opera Közepes`.
+2. Mindegyiknél **⋮ → Beállítások és megosztás** → **Megosztás meghatározott személyekkel** → a robot e-mail címe
+   (1/5. lépés) → **Módosíthatja az eseményeket**; és az adminok is (legalább megtekintési joggal).
+3. Ugyanott, **Naptár integrálása** → **Naptárazonosító** (`…@group.calendar.google.com`) kimásolása.
+4. Vercel → Environment Variables (Production):
+
+   | Változó | Naptár |
+   |---|---|
+   | `GOOGLE_CALENDAR_ID_ASTORIA_NAGY` | Astoria Nagy |
+   | `GOOGLE_CALENDAR_ID_ASTORIA_KIS` | Astoria Kis |
+   | `GOOGLE_CALENDAR_ID_OPERA_NAGY` | Opera Nagy |
+   | `GOOGLE_CALENDAR_ID_OPERA_KOZEPES` | Opera Közepes |
+
+5. Supabase → SQL Editor: `supabase/2026-11-calendars-reminders.sql` (ha még nem futott), majd Vercel → **Redeploy**.
+
+Amelyik teremnek nincs saját változója, az marad a közös `GOOGLE_CALENDAR_ID` naptárban. A már meglévő **mai és
+jövőbeli** események a következő szinkronnál maguktól átkerülnek a terem naptárába (a múltbeliek a közösben
+maradnak). A színek nem változnak. Admin → Foglalások alján a **Szinkronizálás most** gombbal azonnal elindítható.
 
 ---
 

@@ -5,8 +5,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /*
-  Időzített teendők (lejárt fizetési határidő, emlékeztető, félbemaradt számla / e-mail).
-  A Vercel Cron hívja (vercel.json); ezen kívül a foglalóoldal és az admin forgalma is
+  Időzített teendők (lejárt fizetési határidő, emlékeztetők, 24 órával a foglalási nap előtti e-mail,
+  „még nincs rendezve” e-mail, félbemaradt számla / e-mail). Óránként a cron-job.org hívja (FIZETES.md),
+  tartaléknak naponta a Vercel Cron (vercel.json); ezen kívül a foglalóoldal és az admin forgalma is
   elindítja percenként legfeljebb egyszer, így ritka cron mellett is időben lefut.
   Ha a CRON_SECRET be van állítva, csak „Authorization: Bearer <CRON_SECRET>” fejléccel fut.
 */

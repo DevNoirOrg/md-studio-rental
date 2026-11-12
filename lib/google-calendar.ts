@@ -28,11 +28,11 @@ import { endHour, formatBookingHour, type Customer } from "./studio-booking.ts";
  * Termenként: rövid név az esemény címéhez és a Google Naptár eseményszíne
  * (colorId: 11 = Paradicsom/piros, 5 = Banán/sárga, 3 = Szőlő/lila, 10 = Bazsalikom/zöld).
  */
-export const ROOM_CALENDAR: Record<Room, { short: string; colorId: string }> = {
-  "Astoria - Nagy Terem": { short: "Astoria Nagy", colorId: "11" },
-  "Astoria - Kis Terem": { short: "Astoria Kis", colorId: "5" },
-  "Opera - Nagy Terem": { short: "Opera Nagy", colorId: "3" },
-  "Opera - Közepes Terem": { short: "Opera Közepes", colorId: "10" },
+export const ROOM_CALENDAR: Record<Room, { short: string; colorId: string; envKey: string }> = {
+  "Astoria - Nagy Terem": { short: "Astoria Nagy", colorId: "11", envKey: "GOOGLE_CALENDAR_ID_ASTORIA_NAGY" },
+  "Astoria - Kis Terem": { short: "Astoria Kis", colorId: "5", envKey: "GOOGLE_CALENDAR_ID_ASTORIA_KIS" },
+  "Opera - Nagy Terem": { short: "Opera Nagy", colorId: "3", envKey: "GOOGLE_CALENDAR_ID_OPERA_NAGY" },
+  "Opera - Közepes Terem": { short: "Opera Közepes", colorId: "10", envKey: "GOOGLE_CALENDAR_ID_OPERA_KOZEPES" },
 };
 
 const TIME_ZONE = "Europe/Budapest";
@@ -62,14 +62,27 @@ function serviceAccount(): ServiceAccount | null {
   }
 }
 
-/** Be van-e állítva a szinkron (szolgáltatásfiók + legalább egy terem naptára). */
+/** Be van-e állítva a szinkron (szolgáltatásfiók + legalább egy naptár). */
 export function calendarConfigured(): boolean {
-  return !!serviceAccount() && !!calendarId();
+  return !!serviceAccount() && (!!calendarId() || ROOM_IDS.some((room) => !!roomCalendarEnv(room)));
 }
 
-/** A közös naptár azonosítója (minden terem ebbe kerül). */
+/** A közös naptár azonosítója (ebbe kerül az a terem, amelyiknek nincs saját naptára). */
 export function calendarId(): string | null {
   return process.env.GOOGLE_CALENDAR_ID?.trim() || null;
+}
+
+function roomCalendarEnv(room: string): string | null {
+  const key = (ROOM_CALENDAR as Record<string, { envKey: string }>)[room]?.envKey;
+  return (key && process.env[key]?.trim()) || null;
+}
+
+/**
+ * A terem naptára: GOOGLE_CALENDAR_ID_<TEREM> (pl. GOOGLE_CALENDAR_ID_OPERA_NAGY), ha nincs megadva,
+ * a közös naptár. Így a termek naptárai külön ki- és bekapcsolhatók a Google Naptárban.
+ */
+export function calendarIdFor(room: string): string | null {
+  return roomCalendarEnv(room) ?? calendarId();
 }
 
 /** Az idősáv naptáreseményének azonosítója (a Google csak a-v és 0-9 karaktert enged; a hexa ilyen). */
@@ -177,7 +190,7 @@ export function buildEvent(slot: CalendarSlot, adminUrl?: string) {
     `Óratípus: ${lesson}`,
     `Időpont: ${start}–${formatBookingHour(end)} (${slot.durationMinutes} perc)`,
     `Ár: ${currency.format(slot.price)}`,
-    ...(slot.paymentStatus === "awaiting" ? ["Fizetés: még nem fizetett (fizetésre vár)"] : slot.paymentStatus === "paid" ? ["Fizetés: fizetve"] : []),
+    ...(slot.paymentStatus === "awaiting" ? ["Fizetés: még nincs kifizetve"] : slot.paymentStatus === "paid" ? ["Fizetés: fizetve"] : []),
     ...(adminUrl ? ["", `Megnyitás az adminban: ${adminUrl}`] : []),
     "",
     "Ezt az eseményt a foglalási rendszer kezeli — itt ne módosítsd, mert felülíródhat.",
@@ -185,7 +198,7 @@ export function buildEvent(slot: CalendarSlot, adminUrl?: string) {
   return {
     id: eventIdFor(slot.id),
     status: "confirmed",
-    summary: `${room?.short ?? slot.room} · ${lesson} – ${slot.customer.name}${slot.customer.language === "en" ? " (EN)" : ""}${slot.paymentStatus === "awaiting" ? " (fizetésre vár)" : ""}`,
+    summary: `${room?.short ?? slot.room} · ${lesson} – ${slot.customer.name}${slot.customer.language === "en" ? " (EN)" : ""}${slot.paymentStatus === "awaiting" ? " (nincs fizetve)" : ""}`,
     ...(room ? { colorId: room.colorId } : {}),
     description,
     start: { dateTime: `${slot.date}T${start}:00`, timeZone: TIME_ZONE },
@@ -208,6 +221,20 @@ async function upsertEvent(token: string, calendarId: string, event: ReturnType<
   let response = await googleRequest(token, "PUT", `/calendars/${cal}/events/${event.id}`, event);
   if (response.status === 404) response = await googleRequest(token, "POST", `/calendars/${cal}/events`, event);
   if (!response.ok) throw await googleError(response, calendarId);
+}
+
+/** Esemény áthelyezése másik naptárba (pl. a közös naptárból a terem saját naptárába). false: nincs ott. */
+async function moveEvent(token: string, from: string, to: string, slotId: string): Promise<boolean> {
+  const response = await googleRequest(token, "POST",
+    `/calendars/${encodeURIComponent(from)}/events/${eventIdFor(slotId)}/move?destination=${encodeURIComponent(to)}`);
+  if (response.status === 404 || response.status === 410) return false;
+  if (!response.ok) throw await googleError(response, from);
+  return true;
+}
+
+/** Törlés minden naptárból, ahol az esemény lehet (a régi és a mostani helyén is). */
+async function deleteEverywhere(token: string, slotId: string, candidates: Array<string | null | undefined>) {
+  for (const cal of [...new Set(candidates.filter((c): c is string => !!c))]) await deleteEvent(token, cal, slotId);
 }
 
 async function deleteEvent(token: string, calendarId: string, slotId: string) {
@@ -235,6 +262,9 @@ interface DirtyRow {
   duration_minutes: number;
   price: number;
   status: string;
+  /** Melyik naptárba írtuk utoljára (null: még sehova, vagy a termenkénti naptárak előtt — a közösbe). */
+  gcal_calendar_id?: string | null;
+  gcal_synced_at?: string | null;
   studio_requests: { customer: Customer; lesson_type: LessonType; payment_status?: string | null } | null;
 }
 
@@ -249,15 +279,35 @@ async function runSync(): Promise<SyncResult> {
     result.error ??= errorText(err);
   };
   const token = await accessToken(account);
-  const calId = calendarId()!;
+  const common = calendarId();
+
+  // 0) termenkénti naptár beállítása / váltása után: a jövőbeli események áthelyezése a terem naptárába
+  if (ROOM_IDS.some((room) => !!roomCalendarEnv(room))) {
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: TIME_ZONE }).format(new Date());
+    for (const room of ROOM_IDS) {
+      const target = calendarIdFor(room);
+      if (!target) continue;
+      const params = new URLSearchParams({
+        room: `eq.${room}`, status: "eq.approved", gcal_dirty: "is.false", gcal_synced_at: "not.is.null", date: `gte.${today}`,
+        or: `(gcal_calendar_id.is.null,gcal_calendar_id.neq."${target.replace(/"/g, "")}")`,
+      });
+      // régi (közös naptárba írt) eseménynél a gcal_calendar_id üres; ha a cél is a közös naptár, nincs teendő
+      if (target === common) params.set("gcal_calendar_id", "not.is.null");
+      try {
+        await bookingStore(`studio_slots?${params}`, { method: "PATCH", body: { gcal_dirty: true } });
+      } catch (err) {
+        fail(err);
+      }
+    }
+  }
 
   // 1) törölt idősávok eseményei
-  const deletions = await bookingStore<Array<{ slot_id: string; room: string }>>(
-    `gcal_deletions?select=slot_id,room&order=created_at&limit=${BATCH}`,
+  const deletions = await bookingStore<Array<{ slot_id: string; room: string; calendar_id?: string | null }>>(
+    `gcal_deletions?select=slot_id,room,calendar_id&order=created_at&limit=${BATCH}`,
   );
   for (const row of deletions) {
     try {
-      await deleteEvent(token, calId, row.slot_id);
+      await deleteEverywhere(token, row.slot_id, [row.calendar_id, calendarIdFor(row.room), common]);
       await bookingStore(`gcal_deletions?slot_id=eq.${row.slot_id}`, { method: "DELETE" });
       result.removed++;
     } catch (err) {
@@ -267,7 +317,7 @@ async function runSync(): Promise<SyncResult> {
 
   // 2) új / módosult idősávok
   const dirty = await bookingStore<DirtyRow[]>(
-    `studio_slots?select=id,room,date,hour,duration_minutes,price,status,studio_requests(customer,lesson_type,payment_status)&gcal_dirty=is.true&order=date,hour&limit=${BATCH}`,
+    `studio_slots?select=id,room,date,hour,duration_minutes,price,status,gcal_calendar_id,gcal_synced_at,studio_requests(customer,lesson_type,payment_status)&gcal_dirty=is.true&order=date,hour&limit=${BATCH}`,
   );
   for (const row of dirty) {
     // csak akkor jelöljük késznek, ha közben nem változott (különben a következő szinkron újra elvégzi)
@@ -277,21 +327,36 @@ async function runSync(): Promise<SyncResult> {
     });
     try {
       const approved = row.status === "approved" && !!row.studio_requests;
-      if (approved) {
+      const target = calendarIdFor(row.room);
+      // ahol most van az esemény: a tárolt naptár, vagy (a termenkénti naptárak előtti eseménynél) a közös
+      const current = row.gcal_calendar_id ?? (row.gcal_synced_at ? common : null);
+      if (approved && target) {
         const slot: CalendarSlot = {
           id: row.id, room: row.room, date: row.date, hour: Number(row.hour), durationMinutes: row.duration_minutes,
           price: row.price, lessonType: row.studio_requests!.lesson_type, customer: row.studio_requests!.customer,
           paymentStatus: row.studio_requests!.payment_status ?? null,
         };
-        await upsertEvent(token, calId, buildEvent(slot, adminUrlFor(slot)));
+        // másik naptárban van (pl. a közösben) → áthelyezés, hogy ne legyen duplikált esemény
+        if (current && current !== target) {
+          try {
+            await moveEvent(token, current, target, row.id);
+          } catch {
+            await deleteEvent(token, current, row.id).catch(() => {});
+          }
+        }
+        await upsertEvent(token, target, buildEvent(slot, adminUrlFor(slot)));
         result.written++;
       } else {
-        await deleteEvent(token, calId, row.id);
+        await deleteEverywhere(token, row.id, [current, target, common]);
         result.removed++;
       }
       await bookingStore(`studio_slots?${unchanged}`, {
         method: "PATCH",
-        body: { gcal_dirty: false, gcal_error: null, gcal_synced_at: approved ? new Date().toISOString() : null },
+        body: {
+          gcal_dirty: false, gcal_error: null,
+          gcal_synced_at: approved && target ? new Date().toISOString() : null,
+          gcal_calendar_id: approved && target ? target : null,
+        },
       });
     } catch (err) {
       fail(err);

@@ -208,11 +208,19 @@ export async function savePageContent(input: unknown): Promise<ActionResult> {
 //  Fizetés és e-mailek (Stripe, Billingo, bejutási infók)
 // ---------------------------------------------------------------------
 const bilingual = (max: number, label: string) => z.object({ hu: text(max, label), en: text(max, `${label} (angol)`) });
+const monthlyCodes = (studio: string) => z.array(z.object({
+  month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, `Havi kód (${studio}): válassz hónapot.`),
+  code: z.string().trim().min(1, `Havi kód (${studio}): a kód nem lehet üres.`).max(200, `Havi kód (${studio}): túl hosszú.`),
+})).max(60).refine((list) => new Set(list.map((c) => c.month)).size === list.length, `Havi kód (${studio}): egy hónap csak egyszer szerepelhet.`)
+  .transform((list) => [...list].sort((a, b) => a.month.localeCompare(b.month)));
+
 const paymentSettingsSchema = z.object({
   enabled: z.boolean(),
   deadlineEnabled: z.boolean(),
-  deadlineHours: z.number({ error: "Határidő: adj meg egy számot." }).int("Határidő: egész óra legyen.")
-    .min(3, "Határidő: legalább 3 óra.").max(24 * 30, "Határidő: legfeljebb 30 nap."),
+  nearHours: z.number({ error: "Közeli foglalás: adj meg egy számot." }).int("Közeli foglalás: egész óra legyen.")
+    .min(1, "Közeli foglalás: legalább 1 óra.").max(24 * 30, "Közeli foglalás: legfeljebb 30 nap."),
+  payWithinHours: z.number({ error: "Fizetési idő: adj meg egy számot." }).int("Fizetési idő: egész óra legyen.")
+    .min(1, "Fizetési idő: legalább 1 óra.").max(24 * 30, "Fizetési idő: legfeljebb 30 nap."),
   vat: z.enum(VAT_OPTIONS),
   billingoBlockId: z.number().int().positive().nullable(),
   billingoBankAccountId: z.number().int().positive().nullable(),
@@ -220,6 +228,7 @@ const paymentSettingsSchema = z.object({
   itemName: bilingual(120, "Számlatétel megnevezése"),
   invoiceComment: bilingual(1000, "Megjegyzés a számlán"),
   access: z.object({ astoria: bilingual(4000, "Bejutási infók (Astoria)"), opera: bilingual(4000, "Bejutási infók (Opera)") }),
+  codes: z.object({ astoria: monthlyCodes("Astoria"), opera: monthlyCodes("Opera") }),
 });
 
 export async function savePaymentSettings(input: unknown): Promise<ActionResult> {

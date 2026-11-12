@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createVerify, generateKeyPairSync } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
-import { buildEvent, eventIdFor, signedJwt, syncCalendar } from "../lib/google-calendar.ts";
+import { buildEvent, calendarIdFor, eventIdFor, signedJwt, syncCalendar } from "../lib/google-calendar.ts";
 
 const customer = { name: "Teszt Elek", email: "teszt@example.hu", phone: "+36301234567" };
 const SLOT_ID = "0f1e2d3c-4b5a-4968-8776-655443322110";
@@ -36,6 +36,29 @@ test("event: title, booking details, Budapest local time, stable id", () => {
     assert.ok(event.description.replace(/\s/g, "").includes(part.replace(/\s/g, "")), part);
   }
   assert.ok(!event.description.includes("Állapot"));
+});
+
+test("termenkénti naptár: GOOGLE_CALENDAR_ID_<TEREM>, ha nincs, a közös naptár", () => {
+  const saved = { common: process.env.GOOGLE_CALENDAR_ID, opera: process.env.GOOGLE_CALENDAR_ID_OPERA_NAGY };
+  try {
+    process.env.GOOGLE_CALENDAR_ID = "common@group.calendar.google.com";
+    process.env.GOOGLE_CALENDAR_ID_OPERA_NAGY = " opera-nagy@group.calendar.google.com ";
+    assert.equal(calendarIdFor("Opera - Nagy Terem"), "opera-nagy@group.calendar.google.com");
+    assert.equal(calendarIdFor("Astoria - Kis Terem"), "common@group.calendar.google.com");
+    delete process.env.GOOGLE_CALENDAR_ID;
+    assert.equal(calendarIdFor("Astoria - Kis Terem"), null);
+  } finally {
+    if (saved.common === undefined) delete process.env.GOOGLE_CALENDAR_ID; else process.env.GOOGLE_CALENDAR_ID = saved.common;
+    if (saved.opera === undefined) delete process.env.GOOGLE_CALENDAR_ID_OPERA_NAGY; else process.env.GOOGLE_CALENDAR_ID_OPERA_NAGY = saved.opera;
+  }
+});
+
+test("unpaid event title is marked", () => {
+  const event = buildEvent({
+    id: SLOT_ID, room: "Astoria - Nagy Terem", date: "2099-10-15", hour: 10, durationMinutes: 60,
+    price: 6000, lessonType: "privat", customer, paymentStatus: "awaiting",
+  });
+  assert.ok(event.summary.endsWith(" (nincs fizetve)"));
 });
 
 test("service account JWT is signed with RS256", () => {

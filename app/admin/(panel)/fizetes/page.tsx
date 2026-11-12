@@ -23,11 +23,16 @@ export default async function PaymentsPage() {
   }
   const stripeKey = process.env.STRIPE_SECRET_KEY?.trim() ?? "";
   const base = (process.env.APP_BASE_URL ?? "").replace(/\/+$/, "");
+  // az aktuális és a következő hónap (budapesti idő szerint) — a havi kódok figyelmeztetéséhez
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Budapest", year: "numeric", month: "2-digit" }).format(new Date());
+  const [y, m] = today.split("-").map(Number);
+  const months = [today.slice(0, 7), `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, "0")}`];
   return (
     <PaymentsEditor
       initial={normalizePaymentSettings(row?.data)}
       info={row?.updated_at && row.updated_by ? { updatedAt: row.updated_at, updatedBy: row.updated_by } : null}
       loadError={loadError}
+      months={months}
       status={{
         stripe: stripeConfigured() ? (stripeKey.startsWith("sk_live_") || stripeKey.startsWith("rk_live_") ? "live" : "test") : "missing",
         webhook: !!process.env.STRIPE_WEBHOOK_SECRET?.trim(),

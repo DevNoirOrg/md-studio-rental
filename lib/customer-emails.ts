@@ -204,12 +204,14 @@ export function expiredEmail({ locale, name, slots }: { locale: Locale; name: st
 }
 
 /* ── Fizetve + bejutási infók (vagy csak bejutási infók, az adminból) ── */
-export function accessEmail({ locale, name, slots, access, paid, invoiceByEmail }: {
+export function accessEmail({ locale, name, slots, access, paid, invoiceByEmail, laterNote = false }: {
   locale: Locale; name: string; slots: EmailSlot[];
   access: Array<{ studio: string; text: string }>;
   /** true: online fizetés után (köszönjük a fizetést); false: az admin küldte a bejutási infókat. */
   paid: boolean;
   invoiceByEmail: boolean;
+  /** Van olyan nap, amelynek a bejutási infóit később (24 órával előtte) küldjük. */
+  laterNote?: boolean;
 }): Rendered {
   const en = locale === "en";
   const intro = paid
@@ -220,6 +222,11 @@ export function accessEmail({ locale, name, slots, access, paid, invoiceByEmail 
     ? (en ? "We'll send your invoice in a separate email." : "A számlát külön e-mailben küldjük.")
     : "";
   const blocks = access.filter((a) => a.text.trim());
+  const later = laterNote
+    ? (blocks.length
+      ? (en ? "We'll email you the access details for your other days 24 hours before each one." : "A további napokhoz a bejutási infókat az időpont előtt 24 órával e-mailben küldjük.")
+      : (en ? "We'll email you the access details (how to get in) 24 hours before your booking." : "A bejutási infókat az időpont előtt 24 órával e-mailben küldjük."))
+    : "";
   return {
     subject: paid
       ? (en ? "Payment received – your booking is confirmed – MD Dance Studio" : "Sikeres fizetés – a foglalásod végleges – MD Dance Studio")
@@ -229,14 +236,72 @@ export function accessEmail({ locale, name, slots, access, paid, invoiceByEmail 
       slotTable(slots, locale, { prices: paid }), paid ? totalHtml(slots, locale) : "",
       blocks.length ? `<h2 style="margin-top:28px;font-size:18px">${escapeHtml(accessTitle)}</h2>` : "",
       ...blocks.map((a) => `${blocks.length > 1 ? `<h3 style="margin:18px 0 6px;font-size:15px;color:#087c81">${escapeHtml(a.studio)}</h3>` : ""}<div style="line-height:1.6;padding:14px 16px;border-radius:12px;background:#f3fbfb">${nl2br(a.text)}</div>`),
+      later ? p(escapeHtml(later)) : "",
       invoiceText ? p(escapeHtml(invoiceText)) : "",
     ].join("")),
     text: [
       en ? `Hi ${name},` : `Szia ${name}!`, "", intro, slotLines(slots, locale, paid),
       ...(paid ? [`${en ? "Total" : "Összesen"}: ${formatMoney(totalOf(slots), locale)}`] : []),
       ...(blocks.length ? ["", accessTitle.toUpperCase(), ...blocks.flatMap((a) => [...(blocks.length > 1 ? ["", a.studio] : []), a.text])] : []),
+      ...(later ? ["", later] : []),
       ...(invoiceText ? ["", invoiceText] : []),
     ].join("\n"),
+  };
+}
+
+/* ── Emlékeztető a foglalási nap előtt 24 órával (bejutási infókkal, vagy fizetési linkkel) ── */
+export function dayReminderEmail({ locale, name, slots, access, paymentUrl }: {
+  locale: Locale; name: string; slots: EmailSlot[];
+  /** null: nincs kifizetve — a bejutási infók helyett a fizetési link megy. */
+  access: Array<{ studio: string; text: string }> | null;
+  paymentUrl: string | null;
+}): Rendered {
+  const en = locale === "en";
+  const day = slots[0] ? formatDay(slots[0].date, locale) : "";
+  const intro = en ? `A reminder: you have a booking on ${day}:` : `Emlékeztető: ${day} időpontod van nálunk:`;
+  const unpaid = !access;
+  const payText = en
+    ? "Your booking hasn't been paid yet. Please pay using the button below — we'll send you the access details right after payment."
+    : "A foglalásod még nincs kifizetve. Kérjük, fizess az alábbi gombbal — a bejutási infókat a fizetés után azonnal küldjük.";
+  const blocks = (access ?? []).filter((a) => a.text.trim());
+  const accessTitle = en ? "How to get in" : "Bejutási információk";
+  const label = en ? "Pay now" : "Fizetés";
+  return {
+    subject: unpaid
+      ? (en ? "Reminder: your upcoming booking – payment pending – MD Dance Studio" : "Emlékeztető: közelgő időpontod – még nincs kifizetve – MD Dance Studio")
+      : (en ? "Reminder: your booking & how to get in – MD Dance Studio" : "Emlékeztető: időpontod és a bejutási infók – MD Dance Studio"),
+    html: layout(locale, en ? "Booking reminder" : "Emlékeztető", [
+      p(en ? `Hi ${escapeHtml(name)},` : `Szia ${escapeHtml(name)}!`), p(escapeHtml(intro)),
+      slotTable(slots, locale),
+      unpaid ? p(escapeHtml(payText)) + (paymentUrl ? button(label, paymentUrl) : "") : "",
+      blocks.length ? `<h2 style="margin-top:28px;font-size:18px">${escapeHtml(accessTitle)}</h2>` : "",
+      ...blocks.map((a) => `${blocks.length > 1 ? `<h3 style="margin:18px 0 6px;font-size:15px;color:#087c81">${escapeHtml(a.studio)}</h3>` : ""}<div style="line-height:1.6;padding:14px 16px;border-radius:12px;background:#f3fbfb">${nl2br(a.text)}</div>`),
+    ].join("")),
+    text: [
+      en ? `Hi ${name},` : `Szia ${name}!`, "", intro, slotLines(slots, locale, false),
+      ...(unpaid ? ["", payText, ...(paymentUrl ? [`${label}: ${paymentUrl}`] : [])] : []),
+      ...(blocks.length ? ["", accessTitle.toUpperCase(), ...blocks.flatMap((a) => [...(blocks.length > 1 ? ["", a.studio] : []), a.text])] : []),
+    ].join("\n"),
+  };
+}
+
+/* ── Az időpont után még nincs kifizetve ────────────────────────────── */
+export function overdueEmail({ locale, name, slots, paymentUrl }: {
+  locale: Locale; name: string; slots: EmailSlot[]; paymentUrl: string;
+}): Rendered {
+  const en = locale === "en";
+  const body = en
+    ? "We haven't received payment for your booking below yet. Please settle it using the button below. If you've already paid, please ignore this email."
+    : "Az alábbi foglalásod díja még nem érkezett meg hozzánk. Kérjük, rendezd az alábbi gombbal. Ha közben már fizettél, ezt az e-mailt hagyd figyelmen kívül.";
+  const label = en ? "Pay now" : "Fizetés";
+  return {
+    subject: en ? "Your booking hasn't been paid yet – MD Dance Studio" : "A foglalásod díja még nincs rendezve – MD Dance Studio",
+    html: layout(locale, en ? "Payment outstanding" : "Rendezetlen foglalás", [
+      p(en ? `Hi ${escapeHtml(name)},` : `Szia ${escapeHtml(name)}!`), p(escapeHtml(body)),
+      slotTable(slots, locale, { prices: true }), totalHtml(slots, locale), button(label, paymentUrl),
+    ].join("")),
+    text: [en ? `Hi ${name},` : `Szia ${name}!`, "", body, slotLines(slots, locale),
+      `${en ? "Total" : "Összesen"}: ${formatMoney(totalOf(slots), locale)}`, "", `${label}: ${paymentUrl}`].join("\n"),
   };
 }
 
@@ -253,7 +318,7 @@ export function studioNoticeEmail({ kind, customer, slots, detail }: {
     problem: "Figyelem: kézi teendő egy foglalásnál",
   } as const;
   const leads = {
-    paid: "Az ügyfél online kifizette a foglalását. A bejutási infókat automatikusan megkapta.",
+    paid: "Az ügyfél online kifizette a foglalását. A bejutási infókat automatikusan megkapja (az időpont előtt 24 órával, vagy azonnal, ha 24 órán belül van).",
     expired: "A fizetési határidő lejárt, az időpontok felszabadultak. Az ügyfél erről e-mailt kapott.",
     problem: "Valami nem automatikusan ment — kérjük, nézd meg.",
   } as const;

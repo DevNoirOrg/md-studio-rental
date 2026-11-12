@@ -2,9 +2,10 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 /*
   A fizetés szabályai (tiszta függvények, tesztelhetők):
-    - fizetési határidő: a döntéstől számított N óra, de legkésőbb az első időpont előtt 2 órával
-      (és legalább 1 óra, ha az időpont nagyon közel van);
+    - fizetési határidő: ha jóváhagyáskor az első időpont 48 órán belül van (nearHours), nincs határidő —
+      a foglalás bent marad, és az időpont után is fizethető; különben a jóváhagyástól 24 óra (payWithinHours);
     - a Stripe fizetési oldal lejárata: 30 perc – 24 óra között, és nem lehet a határidő után;
+    - emlékeztető / bejutási infó: a foglalási nap első időpontja előtt 24 órával;
     - emlékeztető: 12 órával a határidő előtt, ha a fizetésre adott idő elég hosszú volt;
     - a fizetési link titkos tokenje (HMAC, nem kell tárolni).
 */
@@ -35,17 +36,32 @@ export function firstStart(slots: Array<{ date: string; hour: number }>): number
   return Math.min(...slots.map((s) => budapestInstant(s.date, Number(s.hour))));
 }
 
-/** Fizetési határidő (ms), vagy null, ha nincs határidő. */
-export function computeDue(nowMs: number, startMs: number, settings: { deadlineEnabled: boolean; deadlineHours: number }): number | null {
+/**
+ * Fizetési határidő (ms), vagy null, ha nincs határidő (nem szabadul fel; az időpont után is fizethető).
+ * Közeli foglalásnál (az első időpont nearHours órán belül) nincs határidő, különben payWithinHours óra.
+ */
+export function computeDue(
+  nowMs: number,
+  startMs: number,
+  settings: { deadlineEnabled: boolean; nearHours: number; payWithinHours: number },
+): number | null {
   if (!settings.deadlineEnabled) return null;
-  const due = Math.min(nowMs + settings.deadlineHours * HOUR, startMs - 2 * HOUR);
-  // nagyon közeli időpontnál is legyen legalább 1 óra a fizetésre (de az időpont kezdete után nem)
-  return Math.max(due, Math.min(nowMs + HOUR, startMs));
+  if (startMs - nowMs <= settings.nearHours * HOUR) return null;
+  return Math.min(nowMs + settings.payWithinHours * HOUR, startMs);
+}
+
+/** Mikor menjen a foglalási nap emlékeztetője (a nap első időpontja előtt 24 órával). */
+export const ACCESS_REMINDER_BEFORE_MS = 24 * HOUR;
+
+/** A „még nem rendezted” e-mail ideje: az utolsó időpont napja utáni nap 10:00 (Budapest). */
+export function overdueNoticeAt(lastDay: string): number {
+  const next = new Date(Date.parse(`${lastDay}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  return budapestInstant(next, 10);
 }
 
 /**
  * A Stripe fizetési oldal lejárata (másodperc). A Stripe 30 perc és 24 óra közötti értéket fogad el;
- * nem lehet a határidő (vagy határidő nélkül az első időpont kezdete) után. null: már nem lehet fizetni.
+ * nem lehet a határidő után (határidő nélkül limitMs = Infinity). null: már nem lehet fizetni.
  */
 export function checkoutExpiry(nowMs: number, limitMs: number): number | null {
   const latest = Math.min(nowMs + 23.5 * HOUR, limitMs);
