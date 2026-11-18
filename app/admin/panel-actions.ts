@@ -20,6 +20,7 @@ import { PAYMENT_SETTINGS_KEY, VAT_OPTIONS } from "@/lib/payment-settings";
 import { billingoConfigured, listBillingoOptions, type BillingoOption } from "@/lib/billingo";
 import { markPaidManually, notifyDecisionIfComplete, runInBackground } from "@/lib/payment-flow";
 import { scheduleCalendarSync } from "@/lib/calendar-schedule";
+import { OWN_NAME_MAX, ownSeriesError, ownTimeError } from "@/lib/own-lessons";
 
 /*
   Az admin felület (Termek, Adminok) írási műveletei. Mindegyik:
@@ -350,5 +351,92 @@ export async function syncCalendarNow(): Promise<ActionResult> {
         ? `Kész: ${result.written} bejegyzés frissítve, ${result.removed} törölve a naptárakból.`
         : undefined,
     };
+  });
+}
+
+// ---------------------------------------------------------------------
+//  Saját órák (ismétlődő saját foglalások)
+// ---------------------------------------------------------------------
+const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Érvénytelen dátum.");
+const ownSeriesSchema = z.object({
+  name: required(OWN_NAME_MAX, "Név"),
+  room: z.enum(ROOM_IDS, { error: "Válassz termet." }),
+  weekdays: z.array(z.number().int().min(0).max(6)).min(1, "Válaszd ki, a hét melyik napjain van az óra.").max(7),
+  hour: z.number(),
+  durationMinutes: z.number().int(),
+  startDate: day,
+  endDate: day,
+  excluded: z.array(z.object({ from: day, to: day })).max(30),
+});
+
+export type OwnSeriesResult = { ok: true; created: number; skipped: string[] } | { ok: false; error: string };
+
+export async function createOwnSeries(input: unknown): Promise<OwnSeriesResult> {
+  let outcome: OwnSeriesResult = { ok: false, error: "Ismeretlen hiba történt." };
+  const result = await run(async (email) => {
+    const data = ownSeriesSchema.parse(input);
+    const series = { ...data, name: data.name.trim(), weekdays: [...new Set(data.weekdays)].sort() };
+    const problem = ownSeriesError(series);
+    if (problem) return fail(problem);
+    const created = await bookingStore<{ created: number; skipped: string[] }>("rpc/create_own_series", {
+      method: "POST",
+      body: {
+        p_name: series.name, p_room: series.room, p_weekdays: series.weekdays, p_hour: series.hour,
+        p_duration: series.durationMinutes, p_start: series.startDate, p_end: series.endDate,
+        p_excluded: series.excluded, p_created_by: email,
+      },
+    });
+    scheduleCalendarSync();
+    outcome = { ok: true, created: created?.created ?? 0, skipped: created?.skipped ?? [] };
+  });
+  return result.ok ? outcome : result;
+}
+
+const uuid = z.string().regex(/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i, "Érvénytelen azonosító.");
+
+/** A sorozat alkalmainak törlése a megadott naptól (a korábbiak megmaradnak). */
+export async function deleteOwnSeriesFrom(seriesIdInput: string, fromInput: string): Promise<ActionResult> {
+  return run(async () => {
+    const seriesId = uuid.parse(seriesIdInput);
+    const from = day.parse(fromInput);
+    const rows = await bookingStore<Array<{ request_id: string }>>(`own_series?id=eq.${seriesId}&select=request_id`);
+    if (!rows.length) return fail("A sorozat nem található. Frissítsd az oldalt.");
+    const deleted = await bookingStore<Array<{ id: string }>>(
+      `studio_slots?request_id=eq.${rows[0].request_id}&date=gte.${from}&status=in.(pending,approved)&select=id`,
+      { method: "DELETE", returnRepresentation: true },
+    );
+    scheduleCalendarSync();
+    return { ok: true, message: deleted.length ? `${deleted.length} alkalom törölve.` : "Ettől a naptól nem volt alkalom." };
+  });
+}
+
+/** Egy saját óra alkalmának áthelyezése / rövidítése (a nyitvatartás nem számít, ütközést nem enged). */
+export async function updateOwnOccurrence(slotIdInput: string, input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const slotId = uuid.parse(slotIdInput);
+    const change = z.object({ date: day, hour: z.number(), durationMinutes: z.number().int() }).parse(input);
+    const problem = ownTimeError(change.hour, change.durationMinutes);
+    if (problem) return fail(problem);
+    const rows = await bookingStore<Array<{ date: string; hour: number; duration_minutes: number; studio_requests: { customer: { own?: boolean } } | null }>>(
+      `studio_slots?id=eq.${slotId}&status=eq.approved&select=date,hour,duration_minutes,studio_requests(customer)`,
+    );
+    const original = rows[0];
+    if (!original) return fail("Az alkalom már nem található. Frissítsd a naptárt.");
+    if (!original.studio_requests?.customer?.own) return fail("Ez nem saját óra — ügyfél-foglalást az „Időpont módosítása” gombbal lehet áthelyezni.");
+    const params = new URLSearchParams({
+      id: `eq.${slotId}`, status: "eq.approved", date: `eq.${original.date}`, hour: `eq.${original.hour}`,
+      duration_minutes: `eq.${original.duration_minutes}`, select: "id",
+    });
+    try {
+      const updated = await bookingStore<Array<{ id: string }>>(`studio_slots?${params}`, {
+        method: "PATCH", body: { date: change.date, hour: change.hour, duration_minutes: change.durationMinutes }, returnRepresentation: true,
+      });
+      if (!updated.length) return fail("Az alkalom közben megváltozott. Frissítsd a naptárt, és próbáld újra.");
+    } catch (err) {
+      if ((err as { code?: string }).code === "23505") return fail("Az új idősáv (egy része) foglalt. Válassz másikat; az alkalom nem változott.");
+      throw err;
+    }
+    scheduleCalendarSync();
+    return { ok: true, message: "Az alkalom módosítva." };
   });
 }

@@ -35,6 +35,8 @@ export const ROOM_CALENDAR: Record<Room, { short: string; colorId: string; envKe
   "Opera - Közepes Terem": { short: "Opera Közepes", colorId: "10", envKey: "GOOGLE_CALENDAR_ID_OPERA_KOZEPES" },
 };
 
+/** A saját órák eseményszíne (8 = Grafit/szürke). */
+const OWN_COLOR_ID = "8";
 const TIME_ZONE = "Europe/Budapest";
 const API = "https://www.googleapis.com/calendar/v3";
 const BATCH = 100;
@@ -182,6 +184,25 @@ export function buildEvent(slot: CalendarSlot, adminUrl?: string) {
   const endTime = formatBookingHour(end >= 24 ? end - 24 : end);
   const lesson = lessonNames[slot.lessonType] ?? slot.lessonType;
   const room = (ROOM_CALENDAR as Record<string, { short: string; colorId: string }>)[slot.room];
+  if ((slot.customer as Customer & { own?: boolean }).own) {
+    // saját óra: a cím a sorozat neve, szürke (Grafit), ügyféladatok nélkül
+    return {
+      id: eventIdFor(slot.id),
+      status: "confirmed",
+      summary: slot.customer.name,
+      colorId: OWN_COLOR_ID,
+      description: [
+        "Saját óra (a stúdió foglalása)",
+        `Időpont: ${start}–${formatBookingHour(end)} (${slot.durationMinutes} perc)`,
+        ...(adminUrl ? ["", `Megnyitás az adminban: ${adminUrl}`] : []),
+        "",
+        "Ezt az eseményt a foglalási rendszer kezeli — itt ne módosítsd, mert felülíródhat.",
+      ].join("\n"),
+      start: { dateTime: `${slot.date}T${start}:00`, timeZone: TIME_ZONE },
+      end: { dateTime: `${endDate}T${endTime}:00`, timeZone: TIME_ZONE },
+      extendedProperties: { private: { mdStudioSlotId: slot.id } },
+    };
+  }
   const description = [
     `Név: ${slot.customer.name}`,
     `Telefon: ${slot.customer.phone}`,

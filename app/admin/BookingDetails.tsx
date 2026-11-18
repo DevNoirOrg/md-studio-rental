@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { endHour, formatBookingHour, type AdminSlot, type LessonType } from "@/lib/studio-booking";
 import { withBase } from "@/lib/base-path";
-import { decideBooking, markRequestPaid } from "@/app/admin/panel-actions";
+import { decideBooking, markRequestPaid, updateOwnOccurrence } from "@/app/admin/panel-actions";
 
 const lessonNames: Record<LessonType, string> = { privat: "Privát óra", kiscsoportos: "Kiscsoportos óra", csoportos: "Csoportos óra" };
 const currency = new Intl.NumberFormat("hu-HU", { style: "currency", currency: "HUF", maximumFractionDigits: 0 });
@@ -23,6 +23,7 @@ const dateTime = (iso: string) =>
 
 /** A foglalás állapota a fizetéssel együtt: jóváhagyásra vár / fizetésre vár / fizetve / foglalás alatt. */
 function statusOf(booking: AdminSlot): { label: string; cls: string } {
+  if (booking.own) return { label: "Saját óra", cls: "bg-slate-200 text-slate-800" };
   if (booking.status === "pending") return { label: "Jóváhagyásra vár", cls: "bg-amber-100 text-amber-900" };
   if (booking.payment?.status === "awaiting") return { label: "Jóváhagyva – nincs fizetve", cls: "bg-red-100 text-red-900" };
   if (booking.payment?.status === "paid") return { label: "Fizetve", cls: "bg-emerald-100 text-emerald-900" };
@@ -141,7 +142,7 @@ export default function BookingDetails({ booking, onClose, onDeleted, onStartRes
     <aside ref={panel} role="dialog" aria-modal="false" aria-labelledby="booking-details-title"
       className="fixed inset-y-0 right-0 z-[80] w-full overflow-y-auto border-l border-gray-200 bg-white p-6 shadow-[-8px_0_40px_rgba(0,0,0,0.18)] sm:max-w-md sm:p-8">
       <div className="mb-8 flex items-start justify-between gap-4">
-        <h2 id="booking-details-title" className="section-title text-3xl">Foglalás részletei</h2>
+        <h2 id="booking-details-title" className="section-title text-3xl">{booking.own ? "Saját óra" : "Foglalás részletei"}</h2>
         <button ref={closeButton} type="button" disabled={busy} onClick={() => onClose()} aria-label="Részletek bezárása"
           className="rounded-full bg-gray-100 p-2 hover:bg-[#40CFD5] focus-visible:ring-4 focus-visible:ring-[#40CFD5]/40">
           <X size={22} aria-hidden="true" />
@@ -209,6 +210,7 @@ export default function BookingDetails({ booking, onClose, onDeleted, onStartRes
         </section>
       )}
       <dl className="mt-6 space-y-5 text-sm">
+        {booking.own && <div><dt className="text-gray-500">Név</dt><dd className="mt-1 font-bold">{booking.customer.name}</dd></div>}
         <div><dt className="text-gray-500">Terem</dt><dd className="mt-1 font-bold">{booking.room}</dd></div>
         <div><dt className="text-gray-500">Dátum</dt><dd className="mt-1 font-bold">
           {new Intl.DateTimeFormat("hu-HU", { year: "numeric", month: "long", day: "numeric" }).format(new Date(`${booking.date}T12:00:00`))}
@@ -216,8 +218,8 @@ export default function BookingDetails({ booking, onClose, onDeleted, onStartRes
         <div><dt className="text-gray-500">Idősáv</dt><dd className="mt-1 font-bold">
           {formatBookingHour(booking.hour)}–{formatBookingHour(endHour(booking))} · {booking.durationMinutes} perc
         </dd></div>
-        <div><dt className="text-gray-500">Óratípus</dt><dd className="mt-1 font-bold">{lessonNames[booking.lessonType]}</dd></div>
-        <div><dt className="text-gray-500">Ár</dt><dd className="mt-1 text-lg font-extrabold text-[#087c81]">{currency.format(booking.price)}</dd></div>
+        {!booking.own && <div><dt className="text-gray-500">Óratípus</dt><dd className="mt-1 font-bold">{lessonNames[booking.lessonType]}</dd></div>}
+        {!booking.own && <div><dt className="text-gray-500">Ár</dt><dd className="mt-1 text-lg font-extrabold text-[#087c81]">{currency.format(booking.price)}</dd></div>}
         {booking.status === "approved" && booking.calendar && (
           <div><dt className="text-gray-500">Google Naptár</dt><dd className="mt-1 font-bold">
             {booking.calendar.pending ? (
@@ -231,16 +233,20 @@ export default function BookingDetails({ booking, onClose, onDeleted, onStartRes
         )}
       </dl>
       <div className="mt-8 border-t border-gray-200 pt-6">
-        <button type="button" disabled={busy} onClick={() => onStartReschedule(booking)}
-          className="w-full rounded-xl bg-[#40CFD5] px-5 py-3 font-bold hover:bg-[#38bbc1] focus-visible:ring-4 focus-visible:ring-[#40CFD5]/40">
-          Időpont módosítása
-        </button>
+        {booking.own ? <OwnOccurrenceEditor booking={booking} disabled={busy} onSaved={() => onUpdated?.()} /> : (
+          <button type="button" disabled={busy} onClick={() => onStartReschedule(booking)}
+            className="w-full rounded-xl bg-[#40CFD5] px-5 py-3 font-bold hover:bg-[#38bbc1] focus-visible:ring-4 focus-visible:ring-[#40CFD5]/40">
+            Időpont módosítása
+          </button>
+        )}
       </div>
       <div className="mt-8 border-t border-gray-200 pt-6">
         {confirmDelete ? (
           <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-            <p className="text-sm font-bold text-red-900">Biztosan törlöd ezt a foglalást?</p>
-            <p className="mt-2 text-sm text-red-800">Csak ez az időpont törlődik, és újra foglalhatóvá válik. A többi időpont változatlan marad. Ez nem vonható vissza.</p>
+            <p className="text-sm font-bold text-red-900">{booking.own ? "Biztosan törlöd ezt az alkalmat?" : "Biztosan törlöd ezt a foglalást?"}</p>
+            <p className="mt-2 text-sm text-red-800">{booking.own
+              ? "Csak ez az alkalom törlődik, az idősáv foglalhatóvá válik. A sorozat többi alkalma megmarad. Visszaállítani nem lehet — ha kell, a Saját órák oldalon egy egynapos sorozattal újra felveheted."
+              : "Csak ez az időpont törlődik, és újra foglalhatóvá válik. A többi időpont változatlan marad. Ez nem vonható vissza."}</p>
             <div className="mt-4 flex flex-wrap gap-3">
               <button type="button" disabled={deleting} onClick={deleteBooking}
                 className="rounded-xl bg-red-600 px-4 py-3 text-sm font-bold text-white hover:bg-red-700 disabled:opacity-50">
@@ -253,11 +259,12 @@ export default function BookingDetails({ booking, onClose, onDeleted, onStartRes
         ) : (
           <button type="button" onClick={() => setConfirmDelete(true)}
             className="w-full rounded-xl bg-red-600 px-5 py-3 font-bold text-white hover:bg-red-700 focus-visible:ring-4 focus-visible:ring-red-300">
-            Foglalás törlése
+            {booking.own ? "Alkalom törlése (felszabadítás)" : "Foglalás törlése"}
           </button>
         )}
       </div>
       {error && <p role="alert" className="mt-3 text-sm text-red-800">{error}</p>}
+      {!booking.own && <>
       <h3 className="mt-8 border-t border-gray-200 pt-6 text-lg font-extrabold">Ügyfél adatai</h3>
       <dl className="mt-5 space-y-5 break-words text-sm">
         <div><dt className="text-gray-500">Név</dt><dd className="mt-1 font-bold">{customer.name}</dd></div>
@@ -271,6 +278,62 @@ export default function BookingDetails({ booking, onClose, onDeleted, onStartRes
           <a href={`mailto:${customer.email}`} className="font-bold text-[#087c81] underline">{customer.email}</a>
         </dd></div>
       </dl>
+      </>}
     </aside>
+  );
+}
+
+const HALF_HOURS = Array.from({ length: 49 }, (_, i) => i / 2);
+
+/** Saját óra egy alkalmának áthelyezése / rövidítése (a nyitvatartástól függetlenül). */
+function OwnOccurrenceEditor({ booking, disabled, onSaved }: { booking: AdminSlot; disabled: boolean; onSaved: () => void }) {
+  const [date, setDate] = useState(booking.date);
+  const [start, setStart] = useState(booking.hour);
+  const [end, setEnd] = useState(endHour(booking));
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const changed = date !== booking.date || start !== booking.hour || end !== endHour(booking);
+  async function save() {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const result = await updateOwnOccurrence(booking.id, { date, hour: start, durationMinutes: Math.round((end - start) * 60) });
+      setMessage(result.ok ? { ok: true, text: result.message ?? "Mentve." } : { ok: false, text: result.error });
+      if (result.ok) onSaved();
+    } catch {
+      setMessage({ ok: false, text: "Nem sikerült menteni. Frissítsd a naptárt, és próbáld újra." });
+    } finally {
+      setSaving(false);
+    }
+  }
+  const select = "w-full rounded-lg border border-gray-300 bg-white px-2 py-2 text-sm";
+  return (
+    <section aria-label="Alkalom módosítása" className="space-y-3 text-sm">
+      <p className="font-bold">Alkalom módosítása</p>
+      <p className="text-gray-600">Rövidítsd vagy helyezd át csak ezt az alkalmat (pl. ha egy része felszabadul). A sorozat többi alkalma nem változik.</p>
+      <div className="grid grid-cols-3 gap-2">
+        <label className="col-span-3 sm:col-span-1">
+          <span className="mb-1 block text-xs text-gray-500">Nap</span>
+          <input type="date" className={select} value={date} onChange={(e) => setDate(e.target.value)} />
+        </label>
+        <label>
+          <span className="mb-1 block text-xs text-gray-500">Kezdés</span>
+          <select className={select} value={start} onChange={(e) => setStart(Number(e.target.value))}>
+            {HALF_HOURS.slice(0, -2).map((h) => <option key={h} value={h}>{formatBookingHour(h)}</option>)}
+          </select>
+        </label>
+        <label>
+          <span className="mb-1 block text-xs text-gray-500">Vége</span>
+          <select className={select} value={end} onChange={(e) => setEnd(Number(e.target.value))}>
+            {HALF_HOURS.filter((h) => h >= start + 1).map((h) => <option key={h} value={h}>{formatBookingHour(h)}</option>)}
+          </select>
+        </label>
+      </div>
+      <button type="button" disabled={disabled || saving || !changed || end < start + 1} onClick={save}
+        className="w-full rounded-xl bg-[#40CFD5] px-5 py-3 font-bold hover:bg-[#38bbc1] disabled:opacity-50">
+        {saving ? "Mentés…" : "Módosítás mentése"}
+      </button>
+      {message && <p role={message.ok ? "status" : "alert"} className={message.ok ? "font-bold text-emerald-800" : "text-red-800"}>{message.text}</p>}
+    </section>
   );
 }

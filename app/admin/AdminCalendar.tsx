@@ -257,6 +257,7 @@ export default function AdminCalendar({ config, initialDate, initialRoom, paymen
         <span className="rounded bg-red-100 px-2 py-1 text-red-900">Jóváhagyva – nincs fizetve</span>
         <span className="rounded bg-emerald-100 px-2 py-1 text-emerald-900">Fizetve</span>
         <span className="rounded bg-blue-100 px-2 py-1 text-blue-900">Foglalás alatt (online fizetés nélkül)</span>
+        <span className="rounded bg-slate-200 px-2 py-1 text-slate-800">Saját óra</span>
       </div>
       <div className="mb-5 min-h-5" aria-live="polite">
       {error ? (
@@ -279,14 +280,15 @@ export default function AdminCalendar({ config, initialDate, initialRoom, paymen
               const key = dateKey(day);
               const bookings = ready ? slots.filter((slot) => slot.room === room && slot.date === key) : [];
               const pending = bookings.filter((slot) => slot.status === "pending").length;
-              const approvedList = bookings.filter((slot) => slot.status === "approved");
+              const own = bookings.filter((slot) => slot.status === "approved" && slot.own).length;
+              const approvedList = bookings.filter((slot) => slot.status === "approved" && !slot.own);
               const unpaid = approvedList.filter((slot) => slot.paymentStatus === "awaiting").length;
               const paid = approvedList.filter((slot) => slot.paymentStatus === "paid").length;
               const approved = approvedList.length - unpaid - paid;
               const inMonth = day.getMonth() === selectedDate.getMonth();
               return (
                 <button key={key} type="button"
-                  aria-label={`${key}, ${pending} jóváhagyásra vár, ${unpaid} nincs fizetve, ${paid} fizetve, ${approved} foglalás alatt; napi nézet megnyitása`}
+                  aria-label={`${key}, ${pending} jóváhagyásra vár, ${unpaid} nincs fizetve, ${paid} fizetve, ${approved} foglalás alatt, ${own} saját óra; napi nézet megnyitása`}
                   onClick={() => { changeDate(key); changeView("day"); }}
                   className={`flex min-h-20 flex-col items-center justify-center gap-1 rounded-xl border p-1 text-sm focus-visible:ring-2 focus-visible:ring-[#40CFD5] ${
                     !inMonth ? "border-gray-100 bg-gray-50 text-gray-400" :
@@ -299,6 +301,7 @@ export default function AdminCalendar({ config, initialDate, initialRoom, paymen
                       {unpaid > 0 && <span className="rounded bg-red-100 px-1 text-red-900">{unpaid} nincs fiz.</span>}
                       {paid > 0 && <span className="rounded bg-emerald-100 px-1 text-emerald-900">{paid} fizetve</span>}
                       {approved > 0 && <span className="rounded bg-blue-100 px-1 text-blue-900">{approved} alatt</span>}
+                      {own > 0 && <span className="rounded bg-slate-200 px-1 text-slate-800">{own} saját</span>}
                     </span>
                   ) : <span aria-hidden="true" className="text-xs">…</span>}
                 </button>
@@ -320,7 +323,7 @@ export default function AdminCalendar({ config, initialDate, initialRoom, paymen
                   storedSlots={ready ? slots : []}
                   availabilityReady={ready} now={now}
                   onSelect={selectSlot} onResize={resizeSlot} onRemove={removeSlot} removeOnClick
-                  bookingLabel={(slot) => `${slot.customer.name}${slot.customer.language === "en" ? " (EN)" : ""} · ${headcountLabel[slot.lessonType] ?? ""}`}
+                  bookingLabel={(slot) => slot.own ? slot.customer.name : `${slot.customer.name}${slot.customer.language === "en" ? " (EN)" : ""} · ${headcountLabel[slot.lessonType] ?? ""}`}
                   onBookingClick={(slot, trigger) => {
                     bookingTrigger.current = trigger;
                     setDeleted(false);

@@ -25,7 +25,7 @@ interface AdminSlotRow {
   gcal_error?: string | null;
   studio_requests: {
     id?: string;
-    customer: { name: string; email: string; phone: string; language?: string };
+    customer: { name: string; email: string; phone: string; language?: string; own?: boolean; seriesId?: string };
     lesson_type: string;
     payment_status?: string | null;
     payment_due?: string | null;
@@ -198,7 +198,8 @@ export async function GET(request: NextRequest) {
           ...(studio_requests.customer.language === "en" ? { language: "en" as const } : {}),
         },
         lessonType: studio_requests.lesson_type,
-        ...(studio_requests.id ? {
+        ...(studio_requests.customer.own ? { own: true, ...(studio_requests.customer.seriesId ? { seriesId: studio_requests.customer.seriesId } : {}) } : {}),
+        ...(studio_requests.id && !studio_requests.customer.own ? {
           payment: {
             requestId: studio_requests.id,
             status: studio_requests.payment_status ?? null,

@@ -135,6 +135,19 @@ validation (public and admin API) always reads fresh settings.
 
 **Adminok** adds/removes admins (you cannot remove yourself or the last admin).
 
+## Saját órák (a stúdió ismétlődő foglalásai)
+
+Admin → **Saját órák**: a stúdió saját óráit (pl. félévre a táncórákat) itt lehet előre lefoglalni.
+Egyszer kell lefuttatni a Supabase SQL Editorban: `supabase/2026-11-own-lessons.sql` (nem destruktív, újrafuttatható).
+
+- Egy sorozat: 1 terem, 1 idősáv, a hét egy vagy több napja, egy időszak (legfeljebb 1 év), szünetek.
+  Egyszeri foglaláshoz az első és az utolsó nap ugyanaz.
+- Ha egy alkalomra már van ügyfél-foglalás, azt kihagyja, és kilistázza.
+- A nyitvatartás nem számít. A foglalóoldalon „foglalt”, az admin naptárban szürke, a terem Google naptárában
+  szürke (Grafit) esemény a sorozat nevével.
+- Felszabadítás: a Foglalások naptárban az alkalomra kattintva **Alkalom törlése**, vagy ugyanott rövidíthető / áthelyezhető.
+- Órarendváltáskor: a sorozatnál **Törlés dátumtól** (a korábbi alkalmak megmaradnak), majd új sorozat.
+
 ## Google Calendar sync
 
 Approved bookings are written one-way into the studio's Google Calendar (one event per

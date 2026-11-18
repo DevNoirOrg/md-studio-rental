@@ -26,6 +26,8 @@ export interface StoredSlot extends Slot {
   status?: SlotStatus | string;
   /** Az igény fizetési állapota (admin): awaiting = fizetésre vár, paid = fizetve. */
   paymentStatus?: "awaiting" | "paid" | "expired" | null | string;
+  /** Saját óra (a stúdió ismétlődő saját foglalása) — az admin naptárban szürke. */
+  own?: boolean;
 }
 
 /** Az admin naptárban: az igény fizetési és számla adatai. */
@@ -61,6 +63,9 @@ export interface AdminSlot {
   calendar?: { pending: boolean; synced: boolean; error: string | null };
   payment?: AdminPayment;
   paymentStatus?: AdminPayment["status"];
+  /** Saját óra: a customer.name a sorozat neve, nincs ügyfél, ár és fizetés. */
+  own?: boolean;
+  seriesId?: string;
 }
 
 export interface PricedSlot extends Required<Pick<Slot, "room" | "date" | "hour" | "durationMinutes">> {

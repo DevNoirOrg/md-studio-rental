@@ -1,6 +1,7 @@
 /** Az admin menüpontjai (a sorrend a menü sorrendje). */
 export const adminNav = [
   { href: "/admin", label: "Foglalások" },
+  { href: "/admin/sajat-orak", label: "Saját órák" },
   { href: "/admin/termek", label: "Termek" },
   { href: "/admin/szovegek", label: "Szövegek" },
   { href: "/admin/fizetes", label: "Fizetés és e-mailek" },
